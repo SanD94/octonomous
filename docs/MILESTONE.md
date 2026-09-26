@@ -4,7 +4,7 @@ Sequenced so the protocol layer is proven before any terminal rendering work
 begins. Every protocol milestone leaves behind a runnable probe or PoC; these
 are investigation tools first, not polished interfaces. This keeps real server
 behavior observable while the core evolves instead of deferring all hands-on
-feedback until M6.
+feedback until the UI exists. The protocol core is now frozen.
 
 Each phase lists exit criteria that must be objectively checkable. Do not start a
 phase until the previous one exits.
@@ -14,42 +14,13 @@ phase until the previous one exits.
 ## Dependency order
 
 ```
-M6 headless harness  ← CORE FROZEN
- └─> M7 ratatui view
-      └─> M8 parity
-           └─> M9 packaging
+M7 ratatui view
+ └─> M8 parity
+      └─> M9 packaging
 ```
 
-M6 remains the gate: until it passes, the core and the live REPL are expected to
-churn; after it, the view is where remaining effort goes.
-
----
-
-## M6 — Headless harness — CORE FREEZE
-
-**Goal:** harden the incremental PoC into a repeatable end-to-end harness with
-no UI. This is the gate for M7.
-
-- [ ] Stabilize `octonomous-core/examples/repl.rs` as a scriptable plain
-      stdin/stdout harness: create session, prompt, stream events as plain
-      lines, answer permissions by number, interrupt, and exercise reconnects.
-- [ ] Integration tests: `wiremock` fixtures for the REST surface; a live-server
-      smoke test behind an ignored/feature-gated test.
-- [ ] Record the committed SSE fixture as a regression test; fail on drift.
-- [ ] Measure and publish client RSS during a streaming session. Confirm the
-      ~5–15 MB target from DESCRIPTION §1.1 — and report the real number even if
-      it misses. That figure is currently a projection, not a measurement.
-- [ ] Measure client-side RSS in three states: idle at the prompt, mid-stream
-      with a long response, and with a full transcript loaded. The mid-stream
-      figure is the one that matters and the one most likely to surprise.
-- [ ] Confirm `octonomous-core` has **no** `ratatui`/`crossterm` dependency
-      (`cargo tree` check, ideally a CI assertion).
-- [ ] Freeze the core's public API. Breaking changes after this point are
-      costly.
-
-**Exit:** the REPL drives a full session — prompt, stream, approve, interrupt,
-reconnect — in a non-TTY environment; memory figure published; dependency
-constraint asserted in CI.
+The core and headless harness are frozen; remaining client work belongs in the
+view unless a protocol defect requires a compatible core fix.
 
 ---
 
@@ -118,8 +89,8 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 1. **octonomous does not touch server memory.** The client win (~180 MB, §1.1)
    is independent and still holds. The server's own growth (§1.2,
    ~153 MB → 294-362 MB) is untouched by any milestone here. DESCRIPTION §9 is
-   the investigation, and nothing in M6-M9 should be predicated on its outcome.
-2. **Do not fork or replace the server during M6–M9.** Those phases use it as the
+   the investigation, and nothing in M7–M9 should be predicated on its outcome.
+2. **Do not fork or replace the server during M7–M9.** Those phases use it as the
    behavioral reference. M10+ may implement only the bounded compatibility
    contract in DESCRIPTION §11; a full OpenCode rewrite remains rejected.
 3. **Event drift.** New `type` values will appear. The catch-all variant is what
@@ -135,7 +106,7 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 
 ## Side quests (not on the critical path)
 
-Neither blocks M6-M9. Both are cheap and worth doing opportunistically.
+Neither blocks M7–M9. Both are cheap and worth doing opportunistically.
 
 ### S1 — Upstream spec and docs fixes
 
@@ -157,13 +128,13 @@ a day; the checklist is in that section.
 
 ## Backend phase — after middle and frontend
 
-M6 remains the **middle** phase and M7–M9 remain the **frontend** phase. Only
-after M9 exits does work return to the backend. The backend milestones implement
-the limited compatibility and resource contract in DESCRIPTION §11; they do not
-recreate OpenCode.
+The frozen core is the completed **middle** phase and M7–M9 are the **frontend**
+phase. Only after M9 exits does work return to the backend. The backend
+milestones implement the limited compatibility and resource contract in
+DESCRIPTION §11; they do not recreate OpenCode.
 
 ```
-M6 middle/core
+frozen middle/core
    └─> M7–M9 frontend
           └─> M10 contract + baseline
                  └─> M11 sessions + events
@@ -225,8 +196,8 @@ RSS remains bounded as persisted transcript size grows.
       provider work and settle durable session state.
 - [ ] Bound queues, model context, response buffers, and error payloads.
 
-**Exit:** the headless M6 harness completes, streams, reconnects to, and cancels
-a text-only prompt against `octonomous-server`.
+**Exit:** the headless harness completes, streams, reconnects to, and cancels a
+text-only prompt against `octonomous-server`.
 
 ### M13 — Essential tools and permissions
 

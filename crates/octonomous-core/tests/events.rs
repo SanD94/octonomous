@@ -7,12 +7,14 @@ use octonomous_core::{
     transport::Client,
 };
 use reqwest_eventsource::{Event as SseEvent, EventSource, retry::Never};
+use sha2::{Digest, Sha256};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
 };
 
 const FIXTURE: &str = include_str!("../../../docs/fixtures/prompt-basic-v2.0.18.sse");
+const FIXTURE_SHA256: &str = "ee815cb8447964beddebdb4912cbc4aa20ef9137cdc116919b1f6a4049d0282c";
 
 async fn fixture_server(body: &'static str) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -77,6 +79,15 @@ fn fixture_replays_the_expected_typed_event_sequence() {
     assert_eq!(
         actual.last().unwrap().event_type,
         "session.tool.input.started"
+    );
+}
+
+#[test]
+fn committed_fixture_has_not_drifted() {
+    let actual = format!("{:x}", Sha256::digest(FIXTURE.as_bytes()));
+    assert_eq!(
+        actual, FIXTURE_SHA256,
+        "the recorded fixture changed; verify it against OpenCode v2.0.18 and update the pinned digest deliberately"
     );
 }
 

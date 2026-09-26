@@ -47,16 +47,31 @@ server floor   153 MB   <- unavoidable; a floor, not a total
 server growth  ~300-360 MB after ~20 min of use
 ```
 
-**The client is the larger and far cheaper half of the win.** Replacing 190 MB
-with a ~5–15 MB native binary saves on the order of **180 MB** with no server
-changes whatsoever.
+**The client is the larger and far cheaper half of the win.** The release-mode
+headless client measures **9.0 MB mid-stream**, implying a client-side saving on
+the order of **180 MB** before the terminal view is added, with no server changes
+whatsoever.
 
 > An earlier draft of this document claimed the opposite — that the server
 > dominated and the client was secondary — because it measured only one of the
 > two processes. That was wrong, and the ratio matters for prioritisation.
 
-Expected client RSS: **~5–15 MB** (Rust + `reqwest` + `ratatui`). This is a
-projection, not a measurement; M6 exists to replace it with a real number.
+Release-mode headless client RSS was measured on the author's machine on
+2026-09-26 with `scripts/measure-client-rss.sh`. The figures below are medians of
+five consecutive runs; the probe keeps the authenticated HTTP transports
+resident, accumulates a 1 MiB response for the streaming state, then retains
+that response plus 100 × 100 KiB transcript messages.
+
+| Client state | Median RSS | Observed range |
+|---|---:|---:|
+| Idle at the prompt | **3.8 MB** | 3.7–4.0 MB |
+| Mid-stream, 1 MiB response | **9.0 MB** | 9.0–9.2 MB |
+| Full 10.8 MiB transcript loaded | **31.5 MB** | 30.7–35.8 MB |
+
+The important mid-stream figure meets the original 5–15 MB target. The full
+transcript result also makes the cost of retaining history explicit. These are
+core/headless measurements; the future terminal view's incremental RSS remains
+to be measured separately.
 
 ### 1.2 The server-side problem, stated precisely
 
@@ -349,6 +364,16 @@ property of the core. A live-only stream with no resume token cannot be trusted
 to have caught up, so re-polling on connect is the only correct option rather
 than an optimisation.
 
+### 5.4 Frozen core API
+
+The public `octonomous-core` API is frozen as of 2026-09-26. Consumers may rely
+on the exported auth/discovery, transport, session, event, interaction, and
+reconciliation modules. Compatible additions and protocol-defect fixes are
+allowed; removals, renames, signature changes, and semantic changes require an
+explicit versioned migration. `generated` remains public because core methods
+return pinned V2 protocol types, but it changes only when the pinned protocol
+specification is deliberately updated.
+
 ---
 
 ## 6. Risks
@@ -356,7 +381,7 @@ than an optimisation.
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Server growth (~153 MB → ~300-360 MB) is unbounded and unavoidable from a client | High | Measure before optimising anything; see §9. octonomous still captures the ~180 MB client win independently. |
-| Client win assumed rather than measured | Medium | §1.1 is a projection. M6 publishes the real figure. |
+| Terminal view increment is not yet measured | Low | §1.1 publishes the headless baseline; re-measure the release binary after the view lands. |
 | Generated types fail to deserialize on newer servers | Medium | Lenient event types; `serde(default)`; version-pin the spec in-repo. |
 | Event enum drifts as V2 evolves | Medium | Catch-all `Unknown` variant; capture fixture tests from live streams. |
 | No `securitySchemes` — auth silently absent from codegen | Medium | Covered in §4.2; add a test that fails without auth. |
@@ -432,9 +457,9 @@ server internals, the client is **backend-agnostic**. Any server implementing
 that surface works: OpenCode today, a different implementation later, or a mock
 in tests. Two consequences:
 
-- The generated client, authenticated transport, event ingestion, and remaining M6 protocol
-  work are reusable regardless of what is decided about the server, so it is
-  not speculative.
+- The generated client, authenticated transport, event ingestion, and frozen
+  protocol core are reusable regardless of what is decided about the server,
+  so they are not speculative.
 - The server-side question in §8.1–§8.3 can be deferred without blocking
   client progress.
 
@@ -467,7 +492,7 @@ evidence behind it — which is a far better outcome than a fork.
 |---|---|
 | `CI.md` | Reproducible baseline checks and the pinned OpenCode version. |
 | `DESCRIPTION.md` | This document. |
-| `MILESTONE.md` | Remaining phased plan, M6–M14, with exit criteria. |
+| `MILESTONE.md` | Remaining phased plan, M7–M14, with exit criteria. |
 | `openapi-v2.0.18.json` | Full V2 spec fetched from the live server (248 KB, 138 operations, 247 schemas). Source for generated client code. |
 | `fixtures/prompt-basic-v2.0.18.sse` | Raw captured SSE stream from one real prompt (69 frames, 3 heartbeats). Event-ingestion regression fixture. |
 | `fixtures/prompt-basic-v2.0.18.session-id.txt` | The session ID used for that capture, for reproducing it live. |
@@ -478,8 +503,8 @@ evidence behind it — which is a far better outcome than a fork.
 
 The implementation order is deliberate:
 
-1. **Middle (M6):** prove and freeze the UI-independent protocol and state
-   core against the stock OpenCode server.
+1. **Middle (complete):** the UI-independent protocol and state core is proven
+   and frozen against the stock OpenCode server.
 2. **Frontend (M7–M9):** build and package the native terminal client on that
    core while the stock server remains the behavioral reference.
 3. **Backend (M10+):** return to the server problem only after the client works,

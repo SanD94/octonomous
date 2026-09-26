@@ -1,7 +1,7 @@
-use std::{collections::HashMap, env, error::Error, io::Write};
+use std::{collections::HashMap, env, error::Error};
 
 use octonomous_core::{
-    events::{EventStream, Signal},
+    events::{Event, EventStream, Signal},
     interaction::PermissionReply,
     reconcile::Reconciler,
     session::Delivery,
@@ -19,11 +19,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let client = Client::discover(server.as_deref())?;
-    let stream = EventStream::connect(&client, 1_024)?;
+    let mut stream = EventStream::connect(&client, 1_024)?;
     let mut events = stream.subscribe();
     let session = client.create_session(directory.clone()).await?;
     let session_id = session.id.to_string();
-    eprintln!(
+    println!(
         "session={session_id} directory={}",
         session.location.directory
     );
@@ -32,7 +32,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     print_reconciliation(reconciler.reconcile().await?);
     let mut lines = BufReader::new(tokio::io::stdin()).lines();
     let mut delivery = Delivery::Steer;
-    eprintln!("delivery=steer; type /help for interactive commands");
+    println!("delivery=steer");
+    println!("ready");
 
     loop {
         tokio::select! {
@@ -42,18 +43,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     "" => continue,
                     "/steer" => {
                         delivery = Delivery::Steer;
-                        eprintln!("delivery=steer");
+                        println!("delivery=steer");
                     }
                     "/queue" => {
                         delivery = Delivery::Queue;
-                        eprintln!("delivery=queue");
+                        println!("delivery=queue");
                     }
                     "/help" => print_help(),
                     "/permissions" => print_permissions(&reconciler),
                     "/forms" => print_forms(&reconciler),
+                    "/reconnect" => {
+                        stream = EventStream::connect(&client, 1_024)?;
+                        events = stream.subscribe();
+                        println!("reconnect requested");
+                        print_reconciliation(reconciler.reconcile().await?);
+                    }
                     "/interrupt" => match client.interrupt(&session_id).await {
-                        Ok(interrupted) => eprintln!("interrupt interrupted={interrupted}"),
-                        Err(error) => eprintln!("interrupt failed: {error}"),
+                        Ok(interrupted) => println!("interrupt interrupted={interrupted}"),
+                        Err(error) => println!("error operation=interrupt message={error:?}"),
                     },
                     command if command.starts_with("/once ")
                         || command.starts_with("/always ")
@@ -68,26 +75,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         match numbered_id(number, reconciler.state().pending_permissions.iter().map(|item| item.id.as_str())) {
                             Ok(request_id) => match client.reply_permission(&session_id, &request_id, decision).await {
                                 Ok(()) => {
-                                    eprintln!("permission {request_id} settled decision={decision}");
+                                    println!("permission id={request_id} settled decision={decision}");
                                     print_reconciliation(reconciler.reconcile_interactions().await?);
                                     print_permissions(&reconciler);
                                 }
-                                Err(error) => eprintln!("permission reply failed: {error}"),
+                                Err(error) => println!("error operation=permission-reply message={error:?}"),
                             },
-                            Err(error) => eprintln!("permission reply failed: {error}"),
+                            Err(error) => println!("error operation=permission-reply message={error:?}"),
                         }
                     }
                     command if command.starts_with("/answer ") => {
                         match parse_form_answer(command, &reconciler) {
                             Ok((form_id, answer)) => match client.reply_form(&session_id, &form_id, answer).await {
                                 Ok(()) => {
-                                    eprintln!("form {form_id} answered");
+                                    println!("form id={form_id} answered");
                                     print_reconciliation(reconciler.reconcile_interactions().await?);
                                     print_forms(&reconciler);
                                 }
-                                Err(error) => eprintln!("form reply failed: {error}"),
+                                Err(error) => println!("error operation=form-reply message={error:?}"),
                             },
-                            Err(error) => eprintln!("form reply failed: {error}"),
+                            Err(error) => println!("error operation=form-reply message={error:?}"),
                         }
                     }
                     command if command.starts_with("/cancel-form ") => {
@@ -95,26 +102,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         match numbered_id(number, reconciler.state().pending_forms.iter().map(|item| item.id.as_str())) {
                             Ok(form_id) => match client.cancel_form(&session_id, &form_id).await {
                                 Ok(()) => {
-                                    eprintln!("form {form_id} cancelled");
+                                    println!("form id={form_id} cancelled");
                                     print_reconciliation(reconciler.reconcile_interactions().await?);
                                     print_forms(&reconciler);
                                 }
-                                Err(error) => eprintln!("form cancellation failed: {error}"),
+                                Err(error) => println!("error operation=form-cancel message={error:?}"),
                             },
-                            Err(error) => eprintln!("form cancellation failed: {error}"),
+                            Err(error) => println!("error operation=form-cancel message={error:?}"),
                         }
                     }
                     command if command.starts_with("/find ") => {
                         match client.find_files(&directory, command.trim_start_matches("/find "), 20).await {
                             Ok(entries) => for entry in entries {
-                                eprintln!("{}\t{}", entry.type_, entry.path);
+                                println!("file type={} path={:?}", entry.type_, entry.path);
                             },
-                            Err(error) => eprintln!("file search failed: {error}"),
+                            Err(error) => println!("error operation=file-search message={error:?}"),
                         }
                     }
                     prompt => {
-                        if let Err(error) = client.prompt(&session_id, prompt, delivery).await {
-                            eprintln!("prompt failed: {error}");
+                        match client.prompt(&session_id, prompt, delivery).await {
+                            Ok(item) => println!("prompt id={} delivery={delivery}", item.id.as_str()),
+                            Err(error) => println!("error operation=prompt message={error:?}"),
                         }
                     }
                 }
@@ -123,25 +131,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let signal = signal?;
                 match &signal {
                     Signal::Gap { aggregate_id, expected, observed } =>
-                        eprintln!("gap aggregate={aggregate_id} expected={expected} observed={observed}"),
+                        println!("gap aggregate={aggregate_id} expected={expected} observed={observed}"),
                     Signal::Duplicate { aggregate_id, seq } =>
-                        eprintln!("duplicate aggregate={aggregate_id} seq={seq}"),
-                    Signal::Reconnected => eprintln!("event stream reconnected; awaiting server.connected"),
-                    Signal::ConnectionError(error) => eprintln!("event stream error: {error}"),
-                    Signal::Event(_) => {}
+                        println!("duplicate aggregate={aggregate_id} seq={seq}"),
+                    Signal::Reconnected => println!("reconnected"),
+                    Signal::ConnectionError(error) => println!("connection-error message={error:?}"),
+                    Signal::Event(envelope) => print_event(envelope),
                 }
                 let permissions_before = reconciler.state().pending_permissions.len();
                 let forms_before = reconciler.state().pending_forms.len();
                 let update = reconciler.handle(&signal).await?;
                 if let Some(delta) = update.reduction.assistant_delta {
-                    print!("{delta}");
-                    std::io::stdout().flush()?;
+                    println!("assistant delta={delta:?}");
                 }
                 if let Some(report) = update.reconciliation {
                     for missing in &report.assistant_appends {
-                        print!("{missing}");
+                        println!("assistant repaired={missing:?}");
                     }
-                    std::io::stdout().flush()?;
                     print_reconciliation(report);
                 }
                 if permissions_before != reconciler.state().pending_permissions.len() {
@@ -157,11 +163,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn print_reconciliation(report: octonomous_core::reconcile::Reconciliation) {
-    eprintln!(
+    println!(
         "reconciled changed={} messages={} -> {}",
         report.changed, report.before, report.after
     );
-    eprintln!(
+    println!(
         "pending permissions={} -> {} forms={} -> {}",
         report.permissions_before,
         report.permissions_after,
@@ -169,7 +175,7 @@ fn print_reconciliation(report: octonomous_core::reconcile::Reconciliation) {
         report.forms_after
     );
     if !report.assistant_appends.is_empty() {
-        eprintln!(
+        println!(
             "repaired {} assistant stream gap(s) from authoritative history",
             report.assistant_appends.len()
         );
@@ -177,17 +183,17 @@ fn print_reconciliation(report: octonomous_core::reconcile::Reconciliation) {
 }
 
 fn print_help() {
-    eprintln!("/permissions | /once N | /always N | /reject N");
-    eprintln!(r#"/forms | /answer N {{"field":value}} | /cancel-form N"#);
-    eprintln!("/interrupt | /find QUERY | /steer | /queue");
+    println!("/permissions | /once N | /always N | /reject N");
+    println!(r#"/forms | /answer N {{"field":value}} | /cancel-form N"#);
+    println!("/interrupt | /reconnect | /find QUERY | /steer | /queue");
 }
 
 fn print_permissions(reconciler: &Reconciler) {
     if reconciler.state().pending_permissions.is_empty() {
-        eprintln!("permissions: none pending");
+        println!("permissions none");
     }
     for (index, item) in reconciler.state().pending_permissions.iter().enumerate() {
-        eprintln!(
+        println!(
             "permission {}: id={} action={} resources={:?}{}",
             index + 1,
             item.id,
@@ -203,16 +209,26 @@ fn print_permissions(reconciler: &Reconciler) {
 
 fn print_forms(reconciler: &Reconciler) {
     if reconciler.state().pending_forms.is_empty() {
-        eprintln!("forms: none pending");
+        println!("forms none");
     }
     for (index, item) in reconciler.state().pending_forms.iter().enumerate() {
-        eprintln!(
+        println!(
             "form {}: id={} title={:?} fields={}",
             index + 1,
             item.id,
             item.title,
             item.fields
         );
+    }
+}
+
+fn print_event(envelope: &octonomous_core::events::Envelope) {
+    match &envelope.data {
+        Event::Unknown(value) => println!(
+            "event type={} id={} unknown={value}",
+            envelope.event_type, envelope.id
+        ),
+        _ => println!("event type={} id={}", envelope.event_type, envelope.id),
     }
 }
 
