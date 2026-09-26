@@ -51,8 +51,7 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 
 ## Side quests (not on the critical path)
 
-Neither blocks the backend milestones. Both are cheap and worth doing
-opportunistically.
+These do not block the backend milestones and may be done opportunistically.
 
 ### S1 — Upstream spec and docs fixes
 
@@ -69,6 +68,45 @@ self-contained pull requests against the OpenCode repository:
 
 DESCRIPTION §9. Run before proposing any server-side memory work. Roughly half
 a day; the checklist is in that section.
+
+### S3 — Amp backend
+
+**Goal:** use the native octonomous frontend with either OpenCode or Amp while
+each system continues to own its agent runtime, tools, models, authentication,
+and durable conversation state.
+
+- [ ] Measure the Amp TUI and headless execute mode under the same idle,
+      streaming, and long-transcript workloads. Record the octonomous and Amp
+      process RSS separately; do not assume replacing the TUI reduces the
+      agent runtime's active-turn memory.
+- [ ] Introduce the smallest frontend-facing backend contract justified by the
+      two implementations. Keep the existing OpenCode V2 HTTP/SSE client as one
+      implementation rather than translating Amp into the OpenCode protocol.
+- [ ] Add an Amp implementation that starts the installed `amp` executable in
+      the selected project directory with its documented `--execute`,
+      `--stream-json`, and `--stream-json-input` interface. Keep that process
+      alive for the octonomous session and parse only the published message
+      schema; do not extract or depend on modules from Amp's Bun executable.
+- [ ] Map Amp thread IDs to octonomous sessions, support creating and resuming
+      threads, stream assistant text and tool activity, send follow-up and
+      steering messages through stdin, and terminate the child cleanly on
+      interruption or exit.
+- [ ] Add `--backend opencode|amp` without changing the current OpenCode
+      default. Detect a missing or unauthenticated Amp installation and report
+      an actionable error instead of falling back silently.
+- [ ] Advertise backend capabilities explicitly. In particular, do not emulate
+      octonomous's interactive `once | always | reject` permission workflow
+      unless Amp exposes a documented request/reply protocol for it; rely on
+      Amp's configured permissions and display reported denials meanwhile.
+- [ ] Cover both backends with shared transcript, follow-up, interruption, and
+      resume scenarios, plus backend-specific protocol tests using recorded
+      streaming-JSON fixtures rather than invoking a paid model in the normal
+      test suite.
+
+**Exit:** the same octonomous binary can create and resume useful OpenCode and
+Amp sessions, keep a local Amp process alive across multiple turns, stream its
+published events in the native TUI, and preserve the documented capability
+differences between the two backends.
 
 ---
 
