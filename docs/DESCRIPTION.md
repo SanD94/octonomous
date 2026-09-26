@@ -273,18 +273,21 @@ OpenCode release is a spec refresh plus a diff review.
 5. **SSE → state reconciliation.** The `durable.seq` gap signal and
    poll-on-reconnect logic are policy, not schema.
 
-### 4.3 Codegen risks to retire early
+### 4.3 Codegen findings
 
-- **Zero discriminators across 247 schemas.** Unions are untagged `anyOf`, so
-  generated enums will not discriminate. Mitigation: generate, then inspect the
-  diff; fall back to `serde_json::Value` for the worst offenders rather than
-  fighting the generator.
+- **Zero discriminators across 247 schemas.** The 22 named `anyOf` schemas were
+  audited during code generation. Twenty are distinguishable by JSON shape or a
+  required constant field and retain typed representations. `Form.Value` and
+  `Model.ReasoningField` overlap and therefore degrade to `serde_json::Value`;
+  see `CODEGEN.md`.
 - **`additionalProperties: false` everywhere** plus forward-compatible server
   additions means strict types may fail to deserialize on a newer server. Plan
   for `#[serde(default)]` on generated structs, and prefer lenient types for
   event payloads.
-- **3.1 `contentMediaType`** support in `progenitor` is unproven for this case;
-  this is the main reason the event layer is hand-written rather than generated.
+- **OpenAPI 3.1 normalization.** Progenitor 0.15 targets OpenAPI 3.0. The
+  regeneration utility losslessly converts the nullable and exclusive-bound
+  forms used by the pinned spec before generation. `V2EventEncoded` remains an
+  opaque string, so the event layer is still hand-written.
 
 ---
 
@@ -357,7 +360,7 @@ than an optimisation.
 | Silent wrong-cwd from location handling | Medium | Assert `data.location.directory`; regression test. §3.3. |
 | V2 API marked experimental; routes may change | Medium | Spec refresh is cheap; keep generated code isolated in one directory. |
 | No reference client exists for the V2 surface, so there is nothing to diff behaviour against | Medium | This document's §3 capture and the committed fixture are the reference. |
-| `progenitor` 3.1 quirks block generation | Low | Fallback: `utoipa`/`openapigen`, or hand-written `serde` models from the spec (247 schemas, mechanical). |
+| Progenitor cannot directly consume the pinned 3.1 document | Low | The isolated regeneration utility normalizes its 3.1 constructs to equivalent 3.0 forms; `CODEGEN.md` records each adaptation. |
 
 ---
 
@@ -426,8 +429,8 @@ server internals, the client is **backend-agnostic**. Any server implementing
 that surface works: OpenCode today, a different implementation later, or a mock
 in tests. Two consequences:
 
-- The M1–M6 protocol work is reusable regardless of what is decided about the
-  server, so it is not speculative.
+- The generated client and M2–M6 protocol work are reusable regardless of what
+  is decided about the server, so it is not speculative.
 - The server-side question in §8.1–§8.3 can be deferred without blocking
   client progress.
 
@@ -460,8 +463,8 @@ evidence behind it — which is a far better outcome than a fork.
 |---|---|
 | `CI.md` | Reproducible baseline checks and the pinned OpenCode version. |
 | `DESCRIPTION.md` | This document. |
-| `MILESTONE.md` | Remaining phased plan, M1–M14, with exit criteria. |
-| `openapi-v2.0.18.json` | Full V2 spec fetched from the live server (248 KB, 138 operations, 247 schemas). Source for M1 codegen. |
+| `MILESTONE.md` | Remaining phased plan, M2–M14, with exit criteria. |
+| `openapi-v2.0.18.json` | Full V2 spec fetched from the live server (248 KB, 138 operations, 247 schemas). Source for generated client code. |
 | `fixtures/prompt-basic-v2.0.18.sse` | Raw captured SSE stream from one real prompt (69 frames, 3 heartbeats). Regression fixture for M3. |
 | `fixtures/prompt-basic-v2.0.18.session-id.txt` | The session ID used for that capture, for reproducing it live. |
 
@@ -471,7 +474,7 @@ evidence behind it — which is a far better outcome than a fork.
 
 The implementation order is deliberate:
 
-1. **Middle (M1–M6):** prove and freeze the UI-independent protocol and state
+1. **Middle (M2–M6):** prove and freeze the UI-independent protocol and state
    core against the stock OpenCode server.
 2. **Frontend (M7–M9):** build and package the native terminal client on that
    core while the stock server remains the behavioral reference.
