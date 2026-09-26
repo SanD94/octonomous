@@ -20,7 +20,7 @@ use futures_util::StreamExt;
 use octonomous_core::{
     events::{Event, EventStream, Signal},
     interaction::PermissionReply,
-    reconcile::Reconciler,
+    reconcile::{Reconciler, ends_turn},
     session::{Delivery, SessionOptions},
     transport::Client,
 };
@@ -246,7 +246,7 @@ async fn run(
             }
             signal = events.recv() => {
                 match signal {
-                    Ok(signal) => handle_signal(signal, app, reconciler).await?,
+                    Ok(signal) => handle_signal(signal, app, session_id, reconciler).await?,
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(count)) => {
                         app.set_status(format!("event lag ({count}); reconciling"));
                         reconciler.reconcile().await?;
@@ -329,6 +329,7 @@ async fn handle_command(
 async fn handle_signal(
     signal: Signal,
     app: &mut App,
+    session_id: &str,
     reconciler: &mut Reconciler,
 ) -> Result<(), Box<dyn Error>> {
     match &signal {
@@ -342,13 +343,36 @@ async fn handle_signal(
         Signal::Reconnected => app.set_status("reconnected"),
         Signal::ConnectionError(error) => app.set_status(format!("connection: {error}")),
     }
-    let update = reconciler.handle(&signal).await?;
-    if let Some(delta) = update.reduction.assistant_delta {
-        app.push_assistant_delta(&delta);
+    // The end-of-turn poll repairs transcript order, so failing it must not end
+    // the session: the optimistic echo stays on screen and the next turn,
+    // reconnect, or lag retry re-reads authoritative state.
+    let turn_end = match &signal {
+        Signal::Event(envelope) => ends_turn(envelope, session_id),
+        _ => false,
+    };
+    let update = match reconciler.handle(&signal).await {
+        Ok(update) => Some(update),
+        Err(error) if turn_end => {
+            app.set_status(format!("turn poll failed: {error}"));
+            None
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if let Some(delta) = update
+        .as_ref()
+        .and_then(|update| update.reduction.assistant_delta.as_deref())
+    {
+        app.push_assistant_delta(delta);
     }
-    if update.reconciliation.is_some() {
+    if update
+        .as_ref()
+        .is_some_and(|update| update.reconciliation.is_some())
+    {
         app.finish_assistant_message();
     }
+    // Sync even when the poll failed: `reduce` already cleared the running
+    // flag, and an authoritative transcript may have landed before the
+    // interaction poll failed.
     app.sync(reconciler.state());
     Ok(())
 }

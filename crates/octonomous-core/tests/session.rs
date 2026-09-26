@@ -283,3 +283,58 @@ async fn server_connected_repolls_authoritative_messages() {
     assert!(requests[1].starts_with("GET /api/session/ses_1/permission "));
     assert!(requests[2].starts_with("GET /api/session/ses_1/form "));
 }
+
+#[tokio::test]
+async fn a_finished_turn_repolls_messages_in_authoritative_order() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let mut requests = Vec::new();
+        for body in [
+            json!({
+                "data": [
+                    {"id": "msg_1", "text": "hello", "time": {"created": 1}, "type": "user"},
+                    {"id": "msg_2", "content": [{"type": "text", "text": "hi there"}],
+                     "time": {"created": 2}, "type": "assistant"}
+                ],
+                "cursor": {}
+            }),
+            json!({"data": []}),
+            json!({"data": []}),
+        ] {
+            let (mut connection, _) = listener.accept().await.unwrap();
+            requests.push(read_request(&mut connection).await);
+            respond(&mut connection, &body.to_string()).await;
+        }
+        requests
+    });
+    let mut reconciler = Reconciler::new(client(&format!("http://{address}")), "ses_1");
+    let succeeded = |session: &str| {
+        Signal::Event(
+            Envelope::parse(&format!(
+                r#"{{"id":"evt_1","type":"session.execution.succeeded","data":{{"sessionID":"{session}"}}}}"#
+            ))
+            .unwrap(),
+        )
+    };
+
+    // Another session finishing a turn must not spend a poll on this one.
+    let update = reconciler.handle(&succeeded("ses_other")).await.unwrap();
+    assert!(update.reconciliation.is_none());
+
+    // The turn that ends here has to re-read the transcript, because user
+    // messages never arrive on the event stream and only the server knows
+    // where they sit relative to the reply.
+    let update = reconciler.handle(&succeeded("ses_1")).await.unwrap();
+    let report = update.reconciliation.expect("a finished turn must re-poll");
+
+    assert_eq!(report.after, 2);
+    assert_eq!(reconciler.state().transcript[0].role, Role::User);
+    assert_eq!(reconciler.state().transcript[0].text, "hello");
+    assert_eq!(reconciler.state().transcript[1].role, Role::Assistant);
+    assert_eq!(reconciler.state().transcript[1].text, "hi there");
+    assert!(!reconciler.state().running);
+    let requests = server.await.unwrap();
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].starts_with("GET /api/session/ses_1/message?limit=100&order=asc "));
+}

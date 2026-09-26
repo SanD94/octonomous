@@ -302,13 +302,30 @@ impl Reconciler {
     }
 
     /// Reduce ordinary events and re-poll truth whenever the stream announces
-    /// `server.connected`, including after an automatic reconnect.
+    /// `server.connected`, including after an automatic reconnect, and at the
+    /// end of every turn.
+    ///
+    /// The end-of-turn poll is what keeps a conversation in order. User
+    /// messages never arrive on the event stream, so a prompt a view echoes
+    /// optimistically can only be replaced by authoritative state once the
+    /// server has finished writing it. `session.execution.succeeded` is the
+    /// last event of a turn, so polling there settles the transcript in server
+    /// order before the view renders the next prompt.
     pub async fn handle(&mut self, signal: &Signal) -> Result<Update, envelope::Error> {
         match signal {
             Signal::Event(envelope) if matches!(envelope.data, Event::ServerConnected) => {
                 Ok(Update {
                     reconciliation: Some(self.reconcile().await?),
                     ..Default::default()
+                })
+            }
+            Signal::Event(envelope) if ends_turn(envelope, &self.session_id) => {
+                // Reduce first so the turn is marked finished and any last
+                // streamed text is folded in before authoritative state wins.
+                let reduction = self.state.reduce(&self.session_id, envelope);
+                Ok(Update {
+                    reduction,
+                    reconciliation: Some(self.reconcile().await?),
                 })
             }
             Signal::Event(envelope) => Ok(Update {
@@ -318,6 +335,14 @@ impl Reconciler {
             _ => Ok(Update::default()),
         }
     }
+}
+
+/// Whether `envelope` is the final event of a turn in `session_id`.
+pub fn ends_turn(envelope: &Envelope, session_id: &str) -> bool {
+    matches!(
+        &envelope.data,
+        Event::SessionExecutionSucceeded(value) if value.session_id == session_id
+    )
 }
 
 fn event_session(value: &JsonValue) -> Option<&str> {

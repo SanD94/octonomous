@@ -514,6 +514,65 @@ mod tests {
     }
 
     #[test]
+    fn a_reconciled_turn_shows_the_prompt_above_the_reply() {
+        let mut app = App::new("ses_1".into(), "/project".into());
+        for character in "hello".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
+        }
+        assert!(matches!(
+            app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)),
+            Some(Command::Send(_))
+        ));
+
+        // While the reply streams, the prompt is still only an optimistic echo.
+        // `pending_user` renders after the transcript, so this is the ordering
+        // the end-of-turn poll has to repair.
+        let mut state = SessionState::default();
+        state.transcript.push(TranscriptMessage {
+            id: "msg_a1".into(),
+            role: Role::Assistant,
+            text: "hi there".into(),
+        });
+        app.finish_assistant_message();
+        app.sync(&state);
+        assert_eq!(app.pending_user, vec!["hello"]);
+
+        // The turn ends and the reconciler replaces the projection with
+        // authoritative state, which carries the prompt in server order.
+        state.transcript = vec![
+            TranscriptMessage {
+                id: "msg_u1".into(),
+                role: Role::User,
+                text: "hello".into(),
+            },
+            TranscriptMessage {
+                id: "msg_a1".into(),
+                role: Role::Assistant,
+                text: "hi there".into(),
+            },
+        ];
+        app.sync(&state);
+
+        assert!(
+            app.pending_user.is_empty(),
+            "the echoed prompt must be settled by the authoritative transcript"
+        );
+        let mut terminal = Terminal::new(TestBackend::new(40, 16)).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let display = terminal.backend().to_string();
+        let row = |needle: &str| {
+            display
+                .lines()
+                .position(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("{needle:?} missing from:\n{display}"))
+        };
+        assert!(
+            row("hello") < row("hi there"),
+            "prompt must render above the reply:\n{display}"
+        );
+    }
+
+    #[test]
     fn render_reflows_and_shows_permission_details() {
         let mut app = App::new("ses_1".into(), "/project".into());
         app.transcript.push(TranscriptMessage {
