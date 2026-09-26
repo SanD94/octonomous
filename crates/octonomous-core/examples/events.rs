@@ -1,37 +1,17 @@
-use std::{env, error::Error, fs};
+use std::{env, error::Error};
 
 use octonomous_core::{
-    events::{Envelope, Event, EventStream, SequenceIssue, SequenceTracker, Signal},
+    events::{Envelope, Event, EventStream, Signal},
     transport::Client,
 };
-
-const DEFAULT_FIXTURE: &str = "docs/fixtures/prompt-basic-v2.0.18.sse";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
     match args.next().as_deref() {
-        None | Some("fixture") => replay(args.next().as_deref().unwrap_or(DEFAULT_FIXTURE)),
-        Some("live") => live(args.next().as_deref()).await,
-        Some(other) => Err(format!(
-            "unknown mode {other:?}; use `fixture [path]` or `live [server-url]`"
-        )
-        .into()),
+        None | Some("live") => live(args.next().as_deref()).await,
+        Some(other) => Err(format!("unknown mode {other:?}; use `live [server-url]`").into()),
     }
-}
-
-fn replay(path: &str) -> Result<(), Box<dyn Error>> {
-    let fixture = fs::read_to_string(path)?;
-    let mut sequences = SequenceTracker::default();
-    for line in fixture.lines() {
-        let Some(json) = line.strip_prefix("data: ") else {
-            continue;
-        };
-        let envelope = Envelope::parse(json)?;
-        print_sequence_issue(&envelope, sequences.observe(&envelope));
-        print_event(&envelope);
-    }
-    Ok(())
 }
 
 async fn live(server: Option<&str>) -> Result<(), Box<dyn Error>> {
@@ -52,20 +32,6 @@ async fn live(server: Option<&str>) -> Result<(), Box<dyn Error>> {
             Signal::Reconnected => println!("reconnected"),
             Signal::ConnectionError(error) => println!("connection-error {error}"),
         }
-    }
-}
-
-fn print_sequence_issue(envelope: &Envelope, issue: Option<SequenceIssue>) {
-    match issue {
-        Some(SequenceIssue::Gap { expected, observed }) => println!(
-            "gap aggregate={} expected={expected} observed={observed}",
-            envelope.durable.as_ref().unwrap().aggregate_id
-        ),
-        Some(SequenceIssue::Duplicate { seq }) => println!(
-            "duplicate aggregate={} seq={seq}",
-            envelope.durable.as_ref().unwrap().aggregate_id
-        ),
-        None => {}
     }
 }
 

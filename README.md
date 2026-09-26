@@ -123,7 +123,6 @@ Run the project checks from the repository root:
 ```sh
 cargo build --workspace
 cargo test --workspace --all-targets
-scripts/replay-fixture.sh >/dev/null
 scripts/check-core-dependencies.sh
 ```
 

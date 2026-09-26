@@ -1,8 +1,7 @@
 # Continuous integration notes
 
 The protocol baseline is OpenCode `v2.0.18`. CI and local verification must use
-that exact `opencode-version` when checking the pinned API document or recording
-protocol fixtures.
+that exact `opencode-version` when checking the pinned API document.
 
 Run the baseline checks from the repository root:
 
@@ -10,7 +9,6 @@ Run the baseline checks from the repository root:
 cargo build --workspace
 cargo test --workspace --all-targets
 scripts/fetch-openapi.sh
-scripts/replay-fixture.sh >/dev/null
 scripts/check-core-dependencies.sh
 ```
 

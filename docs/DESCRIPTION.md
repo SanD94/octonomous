@@ -172,24 +172,13 @@ some), `data` (payload, varies by type), `durable` (present on some — carries
 First frame on connect is always `{"type":"server.connected","data":{}}`.
 Subscriptions are **live-only**: no replay, no resume token. See §5.3.
 
-#### Heartbeats are a real parser hazard — measured
+#### Heartbeats are a real parser hazard
 
-Census of the committed fixture (`fixtures/prompt-basic-v2.0.18.sse`, one real
-prompt): 144 lines = **69** `data:` frames + **3** `: heartbeat` comments + 72
-blank separators.
-
-Splitting on blank lines yields 72 chunks, of which **3 contain no `data:` line
-at all**:
-
-| chunk shape | count |
-|---|---|
-| exactly one `data:` line | 69 |
-| one comment line, **zero** `data:` lines | 3 |
-
-A naive `split("\n\n")` + "parse the `data:` field" parser therefore hits 3
-empty-event or null-deref cases per prompt. This is why §4.1 specifies
-`reqwest-eventsource` rather than hand-rolled framing, and why the fixture is
-committed — it reproduces the hazard deterministically, offline.
+Heartbeat comments contain no `data:` field. A naive `split("\n\n")` + "parse
+the `data:` field" parser therefore encounters an empty event for every
+heartbeat. This is why §4.1 specifies
+`reqwest-eventsource` rather than hand-rolled framing. A synthetic regression
+test reproduces the hazard deterministically, offline.
 
 ### 3.5 Event vocabulary (captured live)
 
@@ -408,11 +397,11 @@ and compatibility check without opening the terminal UI.
 | Server growth (~153 MB → ~300-360 MB) is unbounded and unavoidable from a client | High | Measure before optimising anything; see §9. octonomous still captures the ~180 MB client win independently. |
 | Terminal client RSS grows with rendered transcript state | Low | §1.1 publishes both the headless stress baseline and packaged-client idle measurement; retain bounded transcript work in backend acceptance tests. |
 | Generated types fail to deserialize on newer servers | Medium | Lenient event types; `serde(default)`; version-pin the spec in-repo. |
-| Event enum drifts as V2 evolves | Medium | Catch-all `Unknown` variant; capture fixture tests from live streams. |
+| Event enum drifts as V2 evolves | Medium | Catch-all `Unknown` variant; contract tests informed by live streams. |
 | No `securitySchemes` — auth silently absent from codegen | Medium | Covered in §4.2; add a test that fails without auth. |
 | Silent wrong-cwd from location handling | Medium | Assert `data.location.directory`; regression test. §3.3. |
 | V2 API marked experimental; routes may change | Medium | Spec refresh is cheap; keep generated code isolated in one directory. |
-| No reference client exists for the V2 surface, so there is nothing to diff behaviour against | Medium | This document's §3 capture and the committed fixture are the reference. |
+| No reference client exists for the V2 surface, so there is nothing to diff behaviour against | Medium | This document's §3 capture is the reference. |
 | Progenitor cannot directly consume the pinned 3.1 document | Low | The isolated regeneration utility normalizes its 3.1 constructs to equivalent 3.0 forms; `CODEGEN.md` records each adaptation. |
 
 ---
@@ -519,8 +508,6 @@ evidence behind it — which is a far better outcome than a fork.
 | `DESCRIPTION.md` | This document. |
 | `MILESTONE.md` | Remaining backend plan, M10–M14, with exit criteria. |
 | `openapi-v2.0.18.json` | Full V2 spec fetched from the live server (248 KB, 138 operations, 247 schemas). Source for generated client code. |
-| `fixtures/prompt-basic-v2.0.18.sse` | Raw captured SSE stream from one real prompt (69 frames, 3 heartbeats). Event-ingestion regression fixture. |
-| `fixtures/prompt-basic-v2.0.18.session-id.txt` | The session ID used for that capture, for reproducing it live. |
 
 ---
 
