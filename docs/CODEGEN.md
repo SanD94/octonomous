@@ -37,3 +37,10 @@ Two schemas are intrinsically ambiguous and are deliberately generated as
 
 This replacement happens before generation in `tools/codegen`; generated files
 must not be patched by hand.
+
+`Session.Message.Info` is distinguishable on its `type` field, but Progenitor
+0.15 emits its many branches as optional flattened structs. Serde accepts the
+payload while leaving every branch empty, silently discarding message content.
+The lifecycle layer therefore uses the generated endpoint's wire contract but
+decodes authoritative message pages as `serde_json::Value` until the generator
+can represent this union correctly.

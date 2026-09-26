@@ -30,6 +30,10 @@ pub enum Error {
     Transport(#[source] reqwest::Error),
     #[error("OpenCode returned an invalid response: {0}")]
     InvalidResponse(String),
+    #[error(
+        "OpenCode created the session in {actual:?}, not the requested directory {requested:?}"
+    )]
+    WrongDirectory { requested: String, actual: String },
 }
 
 impl Error {

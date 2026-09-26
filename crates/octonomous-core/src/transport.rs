@@ -9,6 +9,7 @@ use crate::{auth::Credentials, discovery, envelope, generated};
 #[derive(Clone, Debug)]
 pub struct Client {
     inner: generated::Client,
+    rest_transport: reqwest::Client,
     event_transport: reqwest::Client,
     base_url: String,
 }
@@ -27,7 +28,7 @@ impl Client {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, authorization);
 
-        let transport = reqwest::Client::builder()
+        let rest_transport = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(15))
             .default_headers(headers.clone())
@@ -41,7 +42,8 @@ impl Client {
             .build()?;
         let base_url = base_url.trim_end_matches('/').to_owned();
         Ok(Self {
-            inner: generated::Client::new_with_client(&base_url, transport),
+            inner: generated::Client::new_with_client(&base_url, rest_transport.clone()),
+            rest_transport,
             event_transport,
             base_url,
         })
@@ -55,6 +57,25 @@ impl Client {
         self.event_transport
             .get(format!("{}/api/event", self.base_url))
             .header("api-version", "0.0.1")
+    }
+
+    pub(crate) fn session_messages_request(
+        &self,
+        session_id: &str,
+        cursor: Option<&str>,
+        limit: &str,
+    ) -> reqwest::RequestBuilder {
+        self.rest_transport
+            .get(format!(
+                "{}/api/session/{session_id}/message",
+                self.base_url
+            ))
+            .header("api-version", "0.0.1")
+            .query(&[
+                ("cursor", cursor),
+                ("limit", Some(limit)),
+                ("order", Some("asc")),
+            ])
     }
 
     pub async fn server_info(&self) -> Result<generated::types::ServerInfo, envelope::Error> {

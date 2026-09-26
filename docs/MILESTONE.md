@@ -14,52 +14,15 @@ phase until the previous one exits.
 ## Dependency order
 
 ```
-M4 lifecycle + reconcile
- └─> M5 permissions / interrupt
-      └─> M6 headless harness  ← CORE FROZEN
-           └─> M7 ratatui view
-                └─> M8 parity
-                     └─> M9 packaging
+M5 permissions / interrupt
+ └─> M6 headless harness  ← CORE FROZEN
+      └─> M7 ratatui view
+           └─> M8 parity
+                └─> M9 packaging
 ```
 
-M4 is the first usable live PoC. M6 remains the gate: until it passes, the core
-and the PoC are expected to churn; after it, the view is where remaining effort
-goes.
-
----
-
-## M4 — Session lifecycle and reconciliation
-
-**Goal:** correct state, not merely received events, exposed through the first
-usable live text PoC.
-
-- [ ] Create session with `location.directory` **in the body**.
-- [ ] **Assert** the response's `data.location.directory` matches what was
-      requested; error loudly otherwise. Guards the silent-wrong-cwd trap
-      (DESCRIPTION §3.3).
-- [ ] List sessions with cursor pagination.
-- [ ] `GET /session/{id}/message` for authoritative history.
-- [ ] Send prompts: `POST /session/{id}/prompt`. Note it returns an inbox item,
-      not a reply — all output arrives via SSE.
-- [ ] **Reconcile on `server.connected`** (which is also the reconnect signal):
-      re-poll authoritative message state and diff against SSE-derived state.
-- [ ] Maintain core-side session state as a reducer over events, with the
-      authoritative poll able to overwrite it.
-- [ ] Support steer vs. queue delivery (inbox `Delivery`:
-      `steer` | `queue`) if exposed by the API.
-- [ ] `octonomous-core/examples/repl.rs` — create a session for an explicit
-      working directory, accept prompts on stdin, stream assistant text to
-      stdout, and print reconciliation diagnostics to stderr. Keep the command
-      deliberately plain so protocol behavior remains visible.
-
-**Exit:**
-- A prompt produces a transcript identical to the stock TUI for the same input.
-- Force-disconnect mid-response, reconnect, and confirm the transcript is
-      correct and gap-free.
-- A test passes `location.directory` and fails if the server returns a
-      different one.
-- A developer can use the REPL for a real text-only OpenCode session and inspect
-      reconnect/reconciliation behavior as it happens.
+M6 remains the gate: until it passes, the core and the live REPL are expected to
+churn; after it, the view is where remaining effort goes.
 
 ---
 
@@ -78,7 +41,7 @@ usable live text PoC.
 - [ ] `POST /session/{id}/interrupt` to cancel in-flight work.
 - [ ] `GET /api/fs/find?query=` backing `@`-file completion.
 - [ ] Detect `SessionBusyError` and surface it rather than retrying blindly.
-- [ ] Extend the M4 REPL with numbered permission/form responses and an
+- [ ] Extend the live REPL with numbered permission/form responses and an
       interrupt command. Print pending and settled state transitions so
       duplicate replies and reconnect recovery can be investigated directly.
 
@@ -185,8 +148,8 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 1. **octonomous does not touch server memory.** The client win (~180 MB, §1.1)
    is independent and still holds. The server's own growth (§1.2,
    ~153 MB → 294-362 MB) is untouched by any milestone here. DESCRIPTION §9 is
-   the investigation, and nothing in M4-M9 should be predicated on its outcome.
-2. **Do not fork or replace the server during M4–M9.** Those phases use it as the
+   the investigation, and nothing in M5-M9 should be predicated on its outcome.
+2. **Do not fork or replace the server during M5–M9.** Those phases use it as the
    behavioral reference. M10+ may implement only the bounded compatibility
    contract in DESCRIPTION §11; a full OpenCode rewrite remains rejected.
 3. **Event drift.** New `type` values will appear. The catch-all variant is what
@@ -202,7 +165,7 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 
 ## Side quests (not on the critical path)
 
-Neither blocks M4-M9. Both are cheap and worth doing opportunistically.
+Neither blocks M5-M9. Both are cheap and worth doing opportunistically.
 
 ### S1 — Upstream spec and docs fixes
 
@@ -224,13 +187,13 @@ a day; the checklist is in that section.
 
 ## Backend phase — after middle and frontend
 
-M4–M6 remain the **middle** phase and M7–M9 remain the **frontend** phase. Only
+M5–M6 remain the **middle** phase and M7–M9 remain the **frontend** phase. Only
 after M9 exits does work return to the backend. The backend milestones implement
 the limited compatibility and resource contract in DESCRIPTION §11; they do not
 recreate OpenCode.
 
 ```
-M4–M6 middle/core
+M5–M6 middle/core
    └─> M7–M9 frontend
           └─> M10 contract + baseline
                  └─> M11 sessions + events
