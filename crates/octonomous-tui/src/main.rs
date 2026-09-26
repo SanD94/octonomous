@@ -5,7 +5,7 @@ use std::{
     env,
     error::Error,
     io, panic,
-    process::{Command as ProcessCommand, Stdio},
+    process::{Child, Command as ProcessCommand, Stdio},
     time::Duration,
 };
 
@@ -42,7 +42,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Action::Run => {}
     }
 
-    let (client, server_version, started_server) = connect(options.server.as_deref()).await?;
+    // `server_process` owns the service this run started, if any. It is held
+    // until the end of `main` so the service is stopped when the client exits.
+    let (client, server_version, server_process) = connect(options.server.as_deref()).await?;
     let version_warning = version_warning(&server_version);
     if let Some(warning) = &version_warning {
         eprintln!("warning: {warning}");
@@ -50,7 +52,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if options.check {
         println!(
             "OpenCode {server_version} is reachable{}",
-            if started_server {
+            if server_process.is_some() {
                 " (started by octonomous)"
             } else {
                 ""
@@ -94,12 +96,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     result
 }
 
-async fn connect(server: Option<&str>) -> Result<(Client, String, bool), Box<dyn Error>> {
+async fn connect(
+    server: Option<&str>,
+) -> Result<(Client, String, Option<ServerGuard>), Box<dyn Error>> {
     let initial = Client::discover(server);
     if let Ok(client) = initial
         && let Ok(info) = client.server_info().await
     {
-        return Ok((client, info.version, false));
+        return Ok((client, info.version, None));
     }
     if server.is_some() {
         return Err(
@@ -107,26 +111,57 @@ async fn connect(server: Option<&str>) -> Result<(Client, String, bool), Box<dyn
         );
     }
 
-    ProcessCommand::new("opencode")
-        .args(["serve", "--service"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| format!("OpenCode is unavailable and could not be started: {error}"))?;
+    // The guard keeps ownership of the process: a bare `Child` would be dropped
+    // here and the service would keep running after octonomous exits.
+    let mut server_process =
+        Some(ServerGuard::start().map_err(|error| {
+            format!("OpenCode is unavailable and could not be started: {error}")
+        })?);
 
     let mut last_error = "server did not become ready".to_owned();
     for _ in 0..30 {
         time::sleep(Duration::from_millis(200)).await;
         match Client::discover(None) {
             Ok(client) => match client.server_info().await {
-                Ok(info) => return Ok((client, info.version, true)),
+                Ok(info) => {
+                    return Ok((client, info.version, server_process.take()));
+                }
                 Err(error) => last_error = error.to_string(),
             },
             Err(error) => last_error = error.to_string(),
         }
     }
+    // Dropping `server_process` stops the service that never became ready.
     Err(format!("OpenCode was started but did not become ready: {last_error}").into())
+}
+
+/// Owns a service process started by octonomous so that it is stopped when the
+/// client exits. `std::process::Child` does not stop the process when dropped,
+/// so ownership has to be tracked and released explicitly.
+struct ServerGuard {
+    child: Child,
+}
+
+impl ServerGuard {
+    fn start() -> io::Result<Self> {
+        let child = ProcessCommand::new("opencode")
+            .args(["serve", "--service"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()?;
+        Ok(Self { child })
+    }
+}
+
+impl Drop for ServerGuard {
+    fn drop(&mut self) {
+        // A service that already exited, or one that refused the port because
+        // another instance won the race, reports an error here. Reap it either
+        // way so no zombie is left behind.
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
 }
 
 async fn select_session(
@@ -376,7 +411,7 @@ fn install_panic_restore() {
 
 #[cfg(test)]
 mod tests {
-    use super::version_warning;
+    use super::{ProcessCommand, ServerGuard, version_warning};
 
     #[test]
     fn warns_only_when_server_major_differs() {
@@ -385,6 +420,42 @@ mod tests {
         assert_eq!(
             version_warning("3.0.0").as_deref(),
             Some("server version 3.0.0 has major version 3; this client targets OpenCode 2.x")
+        );
+    }
+
+    #[cfg(unix)]
+    fn process_is_running(pid: u32) -> bool {
+        ProcessCommand::new("ps")
+            .args(["-p", &pid.to_string()])
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn server_guard_stops_the_process_it_owns() {
+        // Control case: an unowned `Child` keeps running once dropped, so this
+        // test would be vacuous if the guard had nothing to do.
+        let unowned = ProcessCommand::new("sleep").arg("60").spawn().unwrap();
+        let unowned_pid = unowned.id();
+        drop(unowned);
+        assert!(
+            process_is_running(unowned_pid),
+            "an unowned child should outlive its handle"
+        );
+        let _ = ProcessCommand::new("kill")
+            .arg(unowned_pid.to_string())
+            .status();
+
+        let guard = ServerGuard {
+            child: ProcessCommand::new("sleep").arg("60").spawn().unwrap(),
+        };
+        let guarded_pid = guard.child.id();
+        assert!(process_is_running(guarded_pid));
+        drop(guard);
+        assert!(
+            !process_is_running(guarded_pid),
+            "ServerGuard must stop the process it owns"
         );
     }
 }
