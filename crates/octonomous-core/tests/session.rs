@@ -156,6 +156,7 @@ async fn list_sessions_follows_next_cursors() {
     let requests = server.await.unwrap();
     assert!(requests[0].starts_with("GET /api/session?limit=1&order=asc "));
     assert!(requests[1].contains("cursor=page-2"));
+    assert!(!requests[1].contains("order="));
 }
 
 #[tokio::test]
@@ -212,6 +213,7 @@ async fn message_history_follows_next_cursors() {
     let requests = server.await.unwrap();
     assert!(requests[0].contains("limit=1&order=asc"));
     assert!(requests[1].contains("cursor=page-2"));
+    assert!(!requests[1].contains("order="));
 }
 
 #[tokio::test]

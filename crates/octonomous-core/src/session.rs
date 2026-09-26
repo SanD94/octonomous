@@ -92,13 +92,16 @@ impl Client {
         let mut seen = HashSet::new();
         let mut sessions = Vec::new();
         loop {
+            let order = cursor
+                .is_none()
+                .then_some(generated::types::SessionListOrder::Asc);
             let page = self
                 .generated()
                 .session_list(
                     cursor.as_deref(),
                     None,
                     Some(&limit),
-                    Some(generated::types::SessionListOrder::Asc),
+                    order,
                     None,
                     None,
                     None,

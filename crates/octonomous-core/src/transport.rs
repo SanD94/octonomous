@@ -65,17 +65,19 @@ impl Client {
         cursor: Option<&str>,
         limit: &str,
     ) -> reqwest::RequestBuilder {
-        self.rest_transport
+        let request = self
+            .rest_transport
             .get(format!(
                 "{}/api/session/{session_id}/message",
                 self.base_url
             ))
             .header("api-version", "0.0.1")
-            .query(&[
-                ("cursor", cursor),
-                ("limit", Some(limit)),
-                ("order", Some("asc")),
-            ])
+            .query(&[("cursor", cursor), ("limit", Some(limit))]);
+        if cursor.is_none() {
+            request.query(&[("order", "asc")])
+        } else {
+            request
+        }
     }
 
     pub async fn server_info(&self) -> Result<generated::types::ServerInfo, envelope::Error> {
