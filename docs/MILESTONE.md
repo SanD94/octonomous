@@ -1,7 +1,10 @@
 # octonomous — Milestones
 
 Sequenced so the protocol layer is proven before any terminal rendering work
-begins.
+begins. Every protocol milestone leaves behind a runnable probe or PoC; these
+are investigation tools first, not polished interfaces. This keeps real server
+behavior observable while the core evolves instead of deferring all hands-on
+feedback until M6.
 
 Each phase lists exit criteria that must be objectively checkable. Do not start a
 phase until the previous one exits.
@@ -20,8 +23,9 @@ M3 SSE ingestion
                           └─> M9 packaging
 ```
 
-M6 is the gate. Until it passes, the core is expected to churn; after it, the
-view is where remaining effort goes.
+M4 is the first usable live PoC. M6 remains the gate: until it passes, the core
+and the PoC are expected to churn; after it, the view is where remaining effort
+goes.
 
 ---
 
@@ -48,6 +52,10 @@ view is where remaining effort goes.
       equivalent. Track `durable.seq` to detect gaps.
 - [ ] Emit a synthetic `Reconnected` signal to consumers so state can be
       re-verified.
+- [ ] `octonomous-core/examples/events.rs` — an investigation probe that can
+      replay the committed fixture or connect to a live event stream and print
+      typed events, durable sequence numbers, reconnects, gaps, and unknown
+      event payloads as plain lines.
 
 **Exit:**
 - Replaying the committed fixture yields the expected typed event sequence.
@@ -55,12 +63,15 @@ view is where remaining effort goes.
       duplicate or missing terminal events, and a logged gap.
 - A synthetic event with an unrecognised `type` is delivered as `Unknown`
       rather than erroring.
+- The event probe makes each of those behaviors directly observable without a
+      debugger or UI.
 
 ---
 
 ## M4 — Session lifecycle and reconciliation
 
-**Goal:** correct state, not merely received events.
+**Goal:** correct state, not merely received events, exposed through the first
+usable live text PoC.
 
 - [ ] Create session with `location.directory` **in the body**.
 - [ ] **Assert** the response's `data.location.directory` matches what was
@@ -76,6 +87,10 @@ view is where remaining effort goes.
       authoritative poll able to overwrite it.
 - [ ] Support steer vs. queue delivery (inbox `Delivery`:
       `steer` | `queue`) if exposed by the API.
+- [ ] `octonomous-core/examples/repl.rs` — create a session for an explicit
+      working directory, accept prompts on stdin, stream assistant text to
+      stdout, and print reconciliation diagnostics to stderr. Keep the command
+      deliberately plain so protocol behavior remains visible.
 
 **Exit:**
 - A prompt produces a transcript identical to the stock TUI for the same input.
@@ -83,6 +98,8 @@ view is where remaining effort goes.
       correct and gap-free.
 - A test passes `location.directory` and fails if the server returns a
       different one.
+- A developer can use the REPL for a real text-only OpenCode session and inspect
+      reconnect/reconciliation behavior as it happens.
 
 ---
 
@@ -101,22 +118,28 @@ view is where remaining effort goes.
 - [ ] `POST /session/{id}/interrupt` to cancel in-flight work.
 - [ ] `GET /api/fs/find?query=` backing `@`-file completion.
 - [ ] Detect `SessionBusyError` and surface it rather than retrying blindly.
+- [ ] Extend the M4 REPL with numbered permission/form responses and an
+      interrupt command. Print pending and settled state transitions so
+      duplicate replies and reconnect recovery can be investigated directly.
 
 **Exit:**
 - A tool requiring approval is approved once, rejected once, and the transcript
   is correct in both cases.
 - A pending permission survives a mid-prompt reconnect and can still be
   answered.
+- The REPL can drive prompt, approval/rejection, form response, and interruption
+      end to end without a TTY-specific UI.
 
 ---
 
 ## M6 — Headless harness — CORE FREEZE
 
-**Goal:** prove the core end-to-end with no UI. This is the gate for M7.
+**Goal:** harden the incremental PoC into a repeatable end-to-end harness with
+no UI. This is the gate for M7.
 
-- [ ] `octonomous-core/examples/repl.rs` — a plain stdin/stdout REPL: create
-      session, prompt, stream events as plain lines, answer permissions by
-      number.
+- [ ] Stabilize `octonomous-core/examples/repl.rs` as a scriptable plain
+      stdin/stdout harness: create session, prompt, stream events as plain
+      lines, answer permissions by number, interrupt, and exercise reconnects.
 - [ ] Integration tests: `wiremock` fixtures for the REST surface; a live-server
       smoke test behind an ignored/feature-gated test.
 - [ ] Record the committed SSE fixture as a regression test; fail on drift.
