@@ -9,6 +9,8 @@ use crate::{auth::Credentials, discovery, envelope, generated};
 #[derive(Clone, Debug)]
 pub struct Client {
     inner: generated::Client,
+    event_transport: reqwest::Client,
+    base_url: String,
 }
 
 impl Client {
@@ -28,15 +30,31 @@ impl Client {
         let transport = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(15))
             .timeout(Duration::from_secs(15))
+            .default_headers(headers.clone())
+            .build()?;
+        // An SSE request is intentionally unbounded. Applying the REST
+        // transport's whole-request timeout would disconnect a healthy stream
+        // every 15 seconds.
+        let event_transport = reqwest::Client::builder()
+            .connect_timeout(Duration::from_secs(15))
             .default_headers(headers)
             .build()?;
+        let base_url = base_url.trim_end_matches('/').to_owned();
         Ok(Self {
-            inner: generated::Client::new_with_client(base_url.trim_end_matches('/'), transport),
+            inner: generated::Client::new_with_client(&base_url, transport),
+            event_transport,
+            base_url,
         })
     }
 
     pub fn generated(&self) -> &generated::Client {
         &self.inner
+    }
+
+    pub(crate) fn event_request(&self) -> reqwest::RequestBuilder {
+        self.event_transport
+            .get(format!("{}/api/event", self.base_url))
+            .header("api-version", "0.0.1")
     }
 
     pub async fn server_info(&self) -> Result<generated::types::ServerInfo, envelope::Error> {

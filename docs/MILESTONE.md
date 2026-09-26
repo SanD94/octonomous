@@ -14,57 +14,17 @@ phase until the previous one exits.
 ## Dependency order
 
 ```
-M3 SSE ingestion
- └─> M4 lifecycle + reconcile
-      └─> M5 permissions / interrupt
-           └─> M6 headless harness  ← CORE FROZEN
-                └─> M7 ratatui view
-                     └─> M8 parity
-                          └─> M9 packaging
+M4 lifecycle + reconcile
+ └─> M5 permissions / interrupt
+      └─> M6 headless harness  ← CORE FROZEN
+           └─> M7 ratatui view
+                └─> M8 parity
+                     └─> M9 packaging
 ```
 
 M4 is the first usable live PoC. M6 remains the gate: until it passes, the core
 and the PoC are expected to churn; after it, the view is where remaining effort
 goes.
-
----
-
-## M3 — SSE ingestion
-
-**Goal:** a correct, resilient event stream. The highest-risk phase.
-
-- [ ] `events.rs` — **hand-written** event enum from the captured vocabulary:
-      `server.connected`, `session.execution.{started,succeeded}`,
-      `session.text.{started,delta,ended}`,
-      `session.step.{started,streamed,ended}`,
-      `session.inbox.{enqueued,delivered}`, `session.usage.updated`,
-      `session.renamed`, `session.instructions.updated`, and the
-      `*.updated` family.
-- [ ] **Catch-all `Unknown(JsonValue)` variant.** New server event types must
-      never break or crash the client.
-- [ ] Parse the full envelope: `id`, `created`, `type`, `location`, `data`,
-      `durable`.
-- [ ] Use `reqwest-eventsource` for framing. Assert `: heartbeat` comment lines
-      are consumed and not surfaced as events.
-- [ ] Broadcast events over `tokio::sync::broadcast` so multiple consumers can
-      subscribe without contending.
-- [ ] Reconnect with **exponential backoff + jitter**, via `backon` or
-      equivalent. Track `durable.seq` to detect gaps.
-- [ ] Emit a synthetic `Reconnected` signal to consumers so state can be
-      re-verified.
-- [ ] `octonomous-core/examples/events.rs` — an investigation probe that can
-      replay the committed fixture or connect to a live event stream and print
-      typed events, durable sequence numbers, reconnects, gaps, and unknown
-      event payloads as plain lines.
-
-**Exit:**
-- Replaying the committed fixture yields the expected typed event sequence.
-- Killing and restarting the server produces automatic recovery with no
-      duplicate or missing terminal events, and a logged gap.
-- A synthetic event with an unrecognised `type` is delivered as `Unknown`
-      rather than erroring.
-- The event probe makes each of those behaviors directly observable without a
-      debugger or UI.
 
 ---
 
@@ -225,8 +185,8 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 1. **octonomous does not touch server memory.** The client win (~180 MB, §1.1)
    is independent and still holds. The server's own growth (§1.2,
    ~153 MB → 294-362 MB) is untouched by any milestone here. DESCRIPTION §9 is
-   the investigation, and nothing in M3-M9 should be predicated on its outcome.
-2. **Do not fork or replace the server during M3–M9.** Those phases use it as the
+   the investigation, and nothing in M4-M9 should be predicated on its outcome.
+2. **Do not fork or replace the server during M4–M9.** Those phases use it as the
    behavioral reference. M10+ may implement only the bounded compatibility
    contract in DESCRIPTION §11; a full OpenCode rewrite remains rejected.
 3. **Event drift.** New `type` values will appear. The catch-all variant is what
@@ -242,7 +202,7 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 
 ## Side quests (not on the critical path)
 
-Neither blocks M3-M9. Both are cheap and worth doing opportunistically.
+Neither blocks M4-M9. Both are cheap and worth doing opportunistically.
 
 ### S1 — Upstream spec and docs fixes
 
@@ -264,13 +224,13 @@ a day; the checklist is in that section.
 
 ## Backend phase — after middle and frontend
 
-M3–M6 remain the **middle** phase and M7–M9 remain the **frontend** phase. Only
+M4–M6 remain the **middle** phase and M7–M9 remain the **frontend** phase. Only
 after M9 exits does work return to the backend. The backend milestones implement
 the limited compatibility and resource contract in DESCRIPTION §11; they do not
 recreate OpenCode.
 
 ```
-M3–M6 middle/core
+M4–M6 middle/core
    └─> M7–M9 frontend
           └─> M10 contract + baseline
                  └─> M11 sessions + events

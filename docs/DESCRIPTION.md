@@ -246,7 +246,7 @@ pinned V2 spec, not typed out by hand.
 |---|---|---|
 | Protocol types + REST client | **`progenitor`** (OpenAPI 3.1 codegen for Rust) | Spec is 3.1.0 with all 138 `operationId`s present and only 22 `anyOf` unions. Well suited. |
 | HTTP | **`reqwest`** 0.13 (`rustls`, `stream`) | Async, streaming, no OpenSSL; the transport the generated client sits on. |
-| SSE framing | **`reqwest-eventsource`** 0.6 | Handles frame boundaries and heartbeats, which §3.4 shows are not optional details. |
+| SSE framing | **`kameleoon-reqwest-eventsource`** 0.6 (imported as `reqwest-eventsource`) | Maintained reqwest 0.13-compatible fork; handles frame boundaries and heartbeats, which §3.4 shows are not optional details. |
 | Async runtime | **`tokio`** | `reqwest`/`progenitor` assume it. |
 | Serialization | **`serde`** / **`serde_json`** | Required by codegen output. |
 | Errors | **`thiserror`** 2 | Generated code expects it. |
@@ -429,7 +429,7 @@ server internals, the client is **backend-agnostic**. Any server implementing
 that surface works: OpenCode today, a different implementation later, or a mock
 in tests. Two consequences:
 
-- The generated client, authenticated transport, and remaining M3–M6 protocol
+- The generated client, authenticated transport, event ingestion, and remaining M4–M6 protocol
   work are reusable regardless of what is decided about the server, so it is
   not speculative.
 - The server-side question in §8.1–§8.3 can be deferred without blocking
@@ -464,9 +464,9 @@ evidence behind it — which is a far better outcome than a fork.
 |---|---|
 | `CI.md` | Reproducible baseline checks and the pinned OpenCode version. |
 | `DESCRIPTION.md` | This document. |
-| `MILESTONE.md` | Remaining phased plan, M3–M14, with exit criteria. |
+| `MILESTONE.md` | Remaining phased plan, M4–M14, with exit criteria. |
 | `openapi-v2.0.18.json` | Full V2 spec fetched from the live server (248 KB, 138 operations, 247 schemas). Source for generated client code. |
-| `fixtures/prompt-basic-v2.0.18.sse` | Raw captured SSE stream from one real prompt (69 frames, 3 heartbeats). Regression fixture for M3. |
+| `fixtures/prompt-basic-v2.0.18.sse` | Raw captured SSE stream from one real prompt (69 frames, 3 heartbeats). Event-ingestion regression fixture. |
 | `fixtures/prompt-basic-v2.0.18.session-id.txt` | The session ID used for that capture, for reproducing it live. |
 
 ---
@@ -475,7 +475,7 @@ evidence behind it — which is a far better outcome than a fork.
 
 The implementation order is deliberate:
 
-1. **Middle (M3–M6):** prove and freeze the UI-independent protocol and state
+1. **Middle (M4–M6):** prove and freeze the UI-independent protocol and state
    core against the stock OpenCode server.
 2. **Frontend (M7–M9):** build and package the native terminal client on that
    core while the stock server remains the behavioral reference.
