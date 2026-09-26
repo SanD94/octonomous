@@ -30,10 +30,11 @@ Clone the repository and install the terminal client with Cargo:
 ```sh
 git clone git@github.com:SanD94/octonomous.git
 cd octonomous
-cargo install --path crates/octonomous-tui
+cargo install --path crates/octonomous-tui --root ~/.local
 ```
 
-This installs the `octonomous` binary in Cargo's bin directory.
+This installs the binary at `~/.local/bin/octonomous`. Ensure `~/.local/bin` is included in your
+`PATH`.
 
 ## Usage
 
