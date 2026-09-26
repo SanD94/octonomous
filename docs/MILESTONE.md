@@ -14,35 +14,13 @@ phase until the previous one exits.
 ## Dependency order
 
 ```
-M7 ratatui view
- └─> M8 parity
-      └─> M9 packaging
+M8 parity
+ └─> M9 packaging
 ```
 
-The core and headless harness are frozen; remaining client work belongs in the
-view unless a protocol defect requires a compatible core fix.
-
----
-
-## M7 — ratatui view, first cut
-
-**Goal:** first usable terminal UI, built only on the frozen core.
-
-- [ ] `octonomous-tui` crate; terminal setup/teardown via `crossterm`, restored
-      cleanly on panic and on signal.
-- [ ] Layout: scrollable transcript, composer, status bar.
-- [ ] Event loop consuming the `octonomous-core` broadcast; rendering on a tick
-      so a fast token stream does not starve input.
-- [ ] Composer: multiline editing, history, `Enter` to send, `Shift+Enter` /
-      `Ctrl+J` for newline, `Esc` to cancel.
-- [ ] Render assistant text from `session.text.delta`; a spinner on
-      `session.execution.started`, cleared on `succeeded`.
-- [ ] Modal permission prompt; blocks interaction until answered.
-- [ ] Resize handling; reflow on width change.
-- [ ] No protocol logic in this crate. If you need one, add it to core instead.
-
-**Exit:** a real session is driven entirely from the TUI; a permission prompt is
-answered in-app; no protocol imports exist in `octonomous-tui`.
+The core, headless harness, and first-cut terminal view are frozen; remaining
+client work belongs in the view unless a protocol defect requires a compatible
+core fix.
 
 ---
 
@@ -89,8 +67,8 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 1. **octonomous does not touch server memory.** The client win (~180 MB, §1.1)
    is independent and still holds. The server's own growth (§1.2,
    ~153 MB → 294-362 MB) is untouched by any milestone here. DESCRIPTION §9 is
-   the investigation, and nothing in M7–M9 should be predicated on its outcome.
-2. **Do not fork or replace the server during M7–M9.** Those phases use it as the
+   the investigation, and nothing in M8–M9 should be predicated on its outcome.
+2. **Do not fork or replace the server during M8–M9.** Those phases use it as the
    behavioral reference. M10+ may implement only the bounded compatibility
    contract in DESCRIPTION §11; a full OpenCode rewrite remains rejected.
 3. **Event drift.** New `type` values will appear. The catch-all variant is what
@@ -106,7 +84,7 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 
 ## Side quests (not on the critical path)
 
-Neither blocks M7–M9. Both are cheap and worth doing opportunistically.
+Neither blocks M8–M9. Both are cheap and worth doing opportunistically.
 
 ### S1 — Upstream spec and docs fixes
 
@@ -128,14 +106,14 @@ a day; the checklist is in that section.
 
 ## Backend phase — after middle and frontend
 
-The frozen core is the completed **middle** phase and M7–M9 are the **frontend**
-phase. Only after M9 exits does work return to the backend. The backend
+The frozen core is the completed **middle** phase and M8–M9 finish the
+**frontend** phase. Only after M9 exits does work return to the backend. The backend
 milestones implement the limited compatibility and resource contract in
 DESCRIPTION §11; they do not recreate OpenCode.
 
 ```
 frozen middle/core
-   └─> M7–M9 frontend
+   └─> M8–M9 frontend
           └─> M10 contract + baseline
                  └─> M11 sessions + events
                         └─> M12 model loop

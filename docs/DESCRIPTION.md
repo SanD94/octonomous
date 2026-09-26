@@ -70,8 +70,8 @@ that response plus 100 × 100 KiB transcript messages.
 
 The important mid-stream figure meets the original 5–15 MB target. The full
 transcript result also makes the cost of retaining history explicit. These are
-core/headless measurements; the future terminal view's incremental RSS remains
-to be measured separately.
+core/headless measurements; the terminal view's incremental RSS remains to be
+measured separately.
 
 ### 1.2 The server-side problem, stated precisely
 
@@ -265,7 +265,7 @@ pinned V2 spec, not typed out by hand.
 | Async runtime | **`tokio`** | `reqwest`/`progenitor` assume it. |
 | Serialization | **`serde`** / **`serde_json`** | Required by codegen output. |
 | Errors | **`thiserror`** 2 | Generated code expects it. |
-| TUI (later) | **`ratatui`** + **`crossterm`** | Deferred; not a protocol dependency. |
+| TUI | **`ratatui`** + **`crossterm`** | Implemented in the view crate; not a protocol dependency. |
 
 Codegen is re-run from the spec rather than hand-maintained, so tracking a future
 OpenCode release is a spec refresh plus a diff review.
@@ -492,7 +492,7 @@ evidence behind it — which is a far better outcome than a fork.
 |---|---|
 | `CI.md` | Reproducible baseline checks and the pinned OpenCode version. |
 | `DESCRIPTION.md` | This document. |
-| `MILESTONE.md` | Remaining phased plan, M7–M14, with exit criteria. |
+| `MILESTONE.md` | Remaining phased plan, M8–M14, with exit criteria. |
 | `openapi-v2.0.18.json` | Full V2 spec fetched from the live server (248 KB, 138 operations, 247 schemas). Source for generated client code. |
 | `fixtures/prompt-basic-v2.0.18.sse` | Raw captured SSE stream from one real prompt (69 frames, 3 heartbeats). Event-ingestion regression fixture. |
 | `fixtures/prompt-basic-v2.0.18.session-id.txt` | The session ID used for that capture, for reproducing it live. |
@@ -505,8 +505,8 @@ The implementation order is deliberate:
 
 1. **Middle (complete):** the UI-independent protocol and state core is proven
    and frozen against the stock OpenCode server.
-2. **Frontend (M7–M9):** build and package the native terminal client on that
-   core while the stock server remains the behavioral reference.
+2. **Frontend (M8–M9 remaining):** extend and package the native terminal client
+   on that core while the stock server remains the behavioral reference.
 3. **Backend (M10+):** return to the server problem only after the client works,
    then implement a small Rust backend for the subset octonomous actually uses.
 
