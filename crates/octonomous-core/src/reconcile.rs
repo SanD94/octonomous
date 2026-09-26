@@ -24,10 +24,29 @@ pub struct TranscriptMessage {
     pub text: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingPermission {
+    pub id: String,
+    pub action: String,
+    pub resources: Vec<String>,
+    pub message: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingForm {
+    pub id: String,
+    pub title: String,
+    /// The generated field union is retained as JSON so a view can render new
+    /// field variants without changing reconciliation state.
+    pub fields: JsonValue,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SessionState {
     pub running: bool,
     pub transcript: Vec<TranscriptMessage>,
+    pub pending_permissions: Vec<PendingPermission>,
+    pub pending_forms: Vec<PendingForm>,
     streaming: BTreeMap<(String, u64), String>,
 }
 
@@ -44,6 +63,10 @@ pub struct Reconciliation {
     /// Text absent from the SSE projection but present in authoritative state.
     /// A streaming client can append these fragments to repair reconnect gaps.
     pub assistant_appends: Vec<String>,
+    pub permissions_before: usize,
+    pub permissions_after: usize,
+    pub forms_before: usize,
+    pub forms_after: usize,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -82,6 +105,33 @@ impl SessionState {
                     value.text.clone(),
                 );
                 self.upsert_streamed(value.assistant_message_id.clone());
+            }
+            Event::PermissionAsked(value) => {
+                if let Some(permission) = pending_permission(value, session_id) {
+                    self.pending_permissions
+                        .retain(|item| item.id != permission.id);
+                    self.pending_permissions.push(permission);
+                }
+            }
+            Event::PermissionReplied(value) => {
+                if event_session(value) == Some(session_id)
+                    && let Some(id) = value.get("requestID").and_then(JsonValue::as_str)
+                {
+                    self.pending_permissions.retain(|item| item.id != id);
+                }
+            }
+            Event::FormCreated(value) => {
+                if let Some(form) = pending_form(value, session_id) {
+                    self.pending_forms.retain(|item| item.id != form.id);
+                    self.pending_forms.push(form);
+                }
+            }
+            Event::FormReplied(value) | Event::FormCancelled(value) => {
+                if event_session(value) == Some(session_id)
+                    && let Some(id) = value.get("formID").and_then(JsonValue::as_str)
+                {
+                    self.pending_forms.retain(|item| item.id != id);
+                }
             }
             _ => {}
         }
@@ -145,7 +195,26 @@ impl SessionState {
             after,
             changed,
             assistant_appends,
+            permissions_before: self.pending_permissions.len(),
+            permissions_after: self.pending_permissions.len(),
+            forms_before: self.pending_forms.len(),
+            forms_after: self.pending_forms.len(),
         }
+    }
+
+    fn overwrite_interactions(
+        &mut self,
+        permissions: Vec<PendingPermission>,
+        forms: Vec<PendingForm>,
+        report: &mut Reconciliation,
+    ) {
+        report.permissions_before = self.pending_permissions.len();
+        report.permissions_after = permissions.len();
+        report.forms_before = self.pending_forms.len();
+        report.forms_after = forms.len();
+        report.changed |= self.pending_permissions != permissions || self.pending_forms != forms;
+        self.pending_permissions = permissions;
+        self.pending_forms = forms;
     }
 }
 
@@ -176,7 +245,60 @@ impl Reconciler {
             .session_messages(&self.session_id, self.page_size)
             .await?;
         let messages = messages.into_iter().map(transcript_message).collect();
-        Ok(self.state.overwrite(messages))
+        let mut report = self.state.overwrite(messages);
+        self.reconcile_interactions_into(&mut report).await?;
+        Ok(report)
+    }
+
+    /// Re-fetch interactive state after a local reply without re-reading the
+    /// transcript. Reconnects use [`Self::reconcile`] to refresh both.
+    pub async fn reconcile_interactions(&mut self) -> Result<Reconciliation, envelope::Error> {
+        let count = self.state.transcript.len();
+        let mut report = Reconciliation {
+            before: count,
+            after: count,
+            changed: false,
+            assistant_appends: Vec::new(),
+            permissions_before: 0,
+            permissions_after: 0,
+            forms_before: 0,
+            forms_after: 0,
+        };
+        self.reconcile_interactions_into(&mut report).await?;
+        Ok(report)
+    }
+
+    async fn reconcile_interactions_into(
+        &mut self,
+        report: &mut Reconciliation,
+    ) -> Result<(), envelope::Error> {
+        let permissions = self
+            .client
+            .pending_permissions(&self.session_id)
+            .await?
+            .into_iter()
+            .map(|item| PendingPermission {
+                id: item.id.to_string(),
+                action: item.action,
+                resources: item.resources,
+                message: item.message,
+            })
+            .collect();
+        let forms = self
+            .client
+            .pending_forms(&self.session_id)
+            .await?
+            .into_iter()
+            .map(|item| PendingForm {
+                id: item.id.to_string(),
+                title: item.title,
+                fields: serde_json::to_value(item.fields)
+                    .expect("generated form fields must serialize"),
+            })
+            .collect();
+        self.state
+            .overwrite_interactions(permissions, forms, report);
+        Ok(())
     }
 
     /// Reduce ordinary events and re-poll truth whenever the stream announces
@@ -196,6 +318,42 @@ impl Reconciler {
             _ => Ok(Update::default()),
         }
     }
+}
+
+fn event_session(value: &JsonValue) -> Option<&str> {
+    value.get("sessionID").and_then(JsonValue::as_str)
+}
+
+fn pending_permission(value: &JsonValue, session_id: &str) -> Option<PendingPermission> {
+    if event_session(value)? != session_id {
+        return None;
+    }
+    Some(PendingPermission {
+        id: value.get("id")?.as_str()?.to_owned(),
+        action: value.get("action")?.as_str()?.to_owned(),
+        resources: value
+            .get("resources")?
+            .as_array()?
+            .iter()
+            .filter_map(JsonValue::as_str)
+            .map(str::to_owned)
+            .collect(),
+        message: value
+            .get("message")
+            .and_then(JsonValue::as_str)
+            .map(str::to_owned),
+    })
+}
+
+fn pending_form(value: &JsonValue, session_id: &str) -> Option<PendingForm> {
+    if event_session(value)? != session_id {
+        return None;
+    }
+    Some(PendingForm {
+        id: value.get("id")?.as_str()?.to_owned(),
+        title: value.get("title")?.as_str()?.to_owned(),
+        fields: value.get("fields")?.clone(),
+    })
 }
 
 fn transcript_message(value: JsonValue) -> TranscriptMessage {
@@ -274,6 +432,56 @@ mod tests {
     }
 
     #[test]
+    fn reducer_tracks_and_settles_interactive_events() {
+        let mut state = SessionState::default();
+        state.reduce(
+            "ses_target",
+            &event(
+                "permission.asked",
+                serde_json::json!({
+                    "id":"per_1", "sessionID":"ses_target", "action":"bash",
+                    "resources":["cargo test"], "message":"Run tests?"
+                }),
+            ),
+        );
+        state.reduce(
+            "ses_target",
+            &event(
+                "form.created",
+                serde_json::json!({
+                    "id":"frm_1", "sessionID":"ses_target", "title":"Choose",
+                    "fields":[{"key":"target", "type":"string"}]
+                }),
+            ),
+        );
+
+        assert_eq!(state.pending_permissions[0].id, "per_1");
+        assert_eq!(state.pending_forms[0].id, "frm_1");
+
+        state.reduce(
+            "ses_target",
+            &event(
+                "permission.replied",
+                serde_json::json!({
+                    "sessionID":"ses_target", "requestID":"per_1", "reply":"once"
+                }),
+            ),
+        );
+        state.reduce(
+            "ses_target",
+            &event(
+                "form.cancelled",
+                serde_json::json!({
+                    "sessionID":"ses_target", "formID":"frm_1"
+                }),
+            ),
+        );
+
+        assert!(state.pending_permissions.is_empty());
+        assert!(state.pending_forms.is_empty());
+    }
+
+    #[test]
     fn authoritative_messages_replace_sse_projection() {
         let mut state = SessionState {
             transcript: vec![TranscriptMessage {
@@ -298,6 +506,10 @@ mod tests {
                 after: 1,
                 changed: true,
                 assistant_appends: vec!["plete".into()],
+                permissions_before: 0,
+                permissions_after: 0,
+                forms_before: 0,
+                forms_after: 0,
             }
         );
         assert_eq!(state.transcript, authoritative);

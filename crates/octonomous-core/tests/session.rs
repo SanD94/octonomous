@@ -182,17 +182,33 @@ async fn prompt_sends_the_selected_delivery_and_returns_the_inbox_item() {
 
 #[tokio::test]
 async fn server_connected_repolls_authoritative_messages() {
-    let response = json!({
-        "data": [{
-            "id": "msg_1",
-            "text": "authoritative",
-            "time": {"created": 1},
-            "type": "user"
-        }],
-        "cursor": {}
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let mut requests = Vec::new();
+        for body in [
+            json!({
+                "data": [{
+                    "id": "msg_1",
+                    "text": "authoritative",
+                    "time": {"created": 1},
+                    "type": "user"
+                }],
+                "cursor": {}
+            }),
+            json!({"data": [{
+                "id": "per_1", "sessionID": "ses_1", "action": "bash",
+                "resources": ["cargo test"]
+            }]}),
+            json!({"data": []}),
+        ] {
+            let (mut connection, _) = listener.accept().await.unwrap();
+            requests.push(read_request(&mut connection).await);
+            respond(&mut connection, &body.to_string()).await;
+        }
+        requests
     });
-    let (url, server) = one_response(response).await;
-    let mut reconciler = Reconciler::new(client(&url), "ses_1");
+    let mut reconciler = Reconciler::new(client(&format!("http://{address}")), "ses_1");
     let connected = Signal::Event(
         Envelope::parse(r#"{"id":"evt_connected","type":"server.connected","data":{}}"#).unwrap(),
     );
@@ -202,6 +218,9 @@ async fn server_connected_repolls_authoritative_messages() {
     assert_eq!(update.reconciliation.unwrap().after, 1);
     assert_eq!(reconciler.state().transcript[0].role, Role::User);
     assert_eq!(reconciler.state().transcript[0].text, "authoritative");
-    let request = server.await.unwrap();
-    assert!(request.starts_with("GET /api/session/ses_1/message?limit=100&order=asc "));
+    assert_eq!(reconciler.state().pending_permissions[0].id, "per_1");
+    let requests = server.await.unwrap();
+    assert!(requests[0].starts_with("GET /api/session/ses_1/message?limit=100&order=asc "));
+    assert!(requests[1].starts_with("GET /api/session/ses_1/permission "));
+    assert!(requests[2].starts_with("GET /api/session/ses_1/form "));
 }

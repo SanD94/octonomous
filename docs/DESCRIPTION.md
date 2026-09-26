@@ -432,7 +432,7 @@ server internals, the client is **backend-agnostic**. Any server implementing
 that surface works: OpenCode today, a different implementation later, or a mock
 in tests. Two consequences:
 
-- The generated client, authenticated transport, event ingestion, and remaining M5–M6 protocol
+- The generated client, authenticated transport, event ingestion, and remaining M6 protocol
   work are reusable regardless of what is decided about the server, so it is
   not speculative.
 - The server-side question in §8.1–§8.3 can be deferred without blocking
@@ -467,7 +467,7 @@ evidence behind it — which is a far better outcome than a fork.
 |---|---|
 | `CI.md` | Reproducible baseline checks and the pinned OpenCode version. |
 | `DESCRIPTION.md` | This document. |
-| `MILESTONE.md` | Remaining phased plan, M5–M14, with exit criteria. |
+| `MILESTONE.md` | Remaining phased plan, M6–M14, with exit criteria. |
 | `openapi-v2.0.18.json` | Full V2 spec fetched from the live server (248 KB, 138 operations, 247 schemas). Source for generated client code. |
 | `fixtures/prompt-basic-v2.0.18.sse` | Raw captured SSE stream from one real prompt (69 frames, 3 heartbeats). Event-ingestion regression fixture. |
 | `fixtures/prompt-basic-v2.0.18.session-id.txt` | The session ID used for that capture, for reproducing it live. |
@@ -478,7 +478,7 @@ evidence behind it — which is a far better outcome than a fork.
 
 The implementation order is deliberate:
 
-1. **Middle (M5–M6):** prove and freeze the UI-independent protocol and state
+1. **Middle (M6):** prove and freeze the UI-independent protocol and state
    core against the stock OpenCode server.
 2. **Frontend (M7–M9):** build and package the native terminal client on that
    core while the stock server remains the behavioral reference.

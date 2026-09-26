@@ -22,6 +22,12 @@ pub enum Error {
     },
     #[error("session {session_id} is busy: {message}")]
     SessionBusy { session_id: String, message: String },
+    #[error("permission request {request_id} is unavailable or already settled: {message}")]
+    PermissionUnavailable { request_id: String, message: String },
+    #[error("form {form_id} is unavailable: {message}")]
+    FormUnavailable { form_id: String, message: String },
+    #[error("form {form_id} is already settled: {message}")]
+    FormSettled { form_id: String, message: String },
     #[error("OpenCode API error {tag}: {message}")]
     Api { tag: String, message: String },
     #[error("OpenCode returned unexpected HTTP status {0}")]
@@ -82,6 +88,18 @@ pub fn decode_error(value: Value) -> Error {
         },
         "SessionBusyError" => Error::SessionBusy {
             session_id: string_field(&value, "sessionID"),
+            message,
+        },
+        "PermissionNotFoundError" => Error::PermissionUnavailable {
+            request_id: string_field(&value, "requestID"),
+            message,
+        },
+        "FormNotFoundError" => Error::FormUnavailable {
+            form_id: string_field(&value, "id"),
+            message,
+        },
+        "FormAlreadySettledError" => Error::FormSettled {
+            form_id: string_field(&value, "id"),
             message,
         },
         _ => Error::Api {
