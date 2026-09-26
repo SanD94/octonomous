@@ -101,6 +101,9 @@ octonomous --check
 | `a` | Always allow a pending permission |
 | `r` | Reject a pending permission |
 
+The transcript is newest-first and follows new output at the top. Use `Page Down` to read older
+messages and `Page Up` to return toward the latest message.
+
 ## Architecture
 
 The workspace contains two crates:

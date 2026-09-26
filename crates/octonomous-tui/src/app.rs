@@ -144,12 +144,12 @@ impl App {
                 KeyCode::Char('i') if key.modifiers.is_empty() => self.composing = true,
                 KeyCode::Esc if self.running => return Some(Command::Interrupt),
                 KeyCode::PageUp => {
-                    self.follow = false;
                     self.scroll = self.scroll.saturating_sub(5);
+                    self.follow = self.scroll == 0;
                 }
                 KeyCode::PageDown => {
+                    self.follow = false;
                     self.scroll = (self.scroll + 5).min(self.max_scroll);
-                    self.follow = self.scroll == self.max_scroll;
                 }
                 _ => {}
             }
@@ -192,12 +192,12 @@ impl App {
             KeyCode::Up => self.history_up(),
             KeyCode::Down => self.history_down(),
             KeyCode::PageUp => {
-                self.follow = false;
                 self.scroll = self.scroll.saturating_sub(5);
+                self.follow = self.scroll == 0;
             }
             KeyCode::PageDown => {
+                self.follow = false;
                 self.scroll = (self.scroll + 5).min(self.max_scroll);
-                self.follow = self.scroll == self.max_scroll;
             }
             _ => {}
         }
@@ -299,19 +299,38 @@ impl App {
 
     fn render_transcript(&mut self, frame: &mut Frame, area: Rect) {
         let mut lines = Vec::new();
-        for message in &self.transcript {
-            let (label, color) = match &message.role {
-                Role::User => ("You", Color::Cyan),
-                Role::Assistant => ("Assistant", Color::Green),
-                Role::Other(role) => (role.as_str(), Color::Yellow),
-            };
-            append_message(&mut lines, label, color, &message.text);
-        }
-        for message in &self.pending_user {
-            append_message(&mut lines, "You", Color::Cyan, message);
-        }
+        let mut continuing_assistant = false;
         if !self.assistant_draft.is_empty() {
             append_message(&mut lines, "Assistant", Color::Green, &self.assistant_draft);
+            continuing_assistant = true;
+        }
+        for message in self.pending_user.iter().rev() {
+            append_message(&mut lines, "You", Color::Cyan, message);
+            continuing_assistant = false;
+        }
+        for message in self
+            .transcript
+            .iter()
+            .rev()
+            .filter(|message| !message.text.is_empty())
+        {
+            match &message.role {
+                Role::Assistant if continuing_assistant => {
+                    append_message_continuation(&mut lines, &message.text);
+                }
+                Role::Assistant => {
+                    append_message(&mut lines, "Assistant", Color::Green, &message.text);
+                    continuing_assistant = true;
+                }
+                Role::User => {
+                    append_message(&mut lines, "You", Color::Cyan, &message.text);
+                    continuing_assistant = false;
+                }
+                Role::Other(role) => {
+                    append_message(&mut lines, role, Color::Yellow, &message.text);
+                    continuing_assistant = false;
+                }
+            }
         }
 
         let inner_width = area.width.saturating_sub(2).max(1) as usize;
@@ -322,7 +341,7 @@ impl App {
         let viewport = area.height.saturating_sub(2) as usize;
         self.max_scroll = visual_lines.saturating_sub(viewport).min(u16::MAX as usize) as u16;
         if self.follow {
-            self.scroll = self.max_scroll;
+            self.scroll = 0;
         } else {
             self.scroll = self.scroll.min(self.max_scroll);
         }
@@ -399,6 +418,12 @@ fn append_message<'a>(lines: &mut Vec<Line<'a>>, label: &'a str, color: Color, t
     } else {
         lines.extend(text.lines().map(Line::raw));
     }
+    lines.push(Line::default());
+}
+
+fn append_message_continuation<'a>(lines: &mut Vec<Line<'a>>, text: &'a str) {
+    lines.pop();
+    lines.extend(text.lines().map(Line::raw));
     lines.push(Line::default());
 }
 
@@ -558,7 +583,7 @@ mod tests {
     }
 
     #[test]
-    fn a_reconciled_turn_shows_the_prompt_above_the_reply() {
+    fn a_reconciled_turn_shows_the_reply_above_its_prompt() {
         let mut app = App::new("ses_1".into(), "/project".into());
         app.handle_key(key(KeyCode::Char('i')));
         for character in "hello".chars() {
@@ -570,8 +595,6 @@ mod tests {
         ));
 
         // While the reply streams, the prompt is still only an optimistic echo.
-        // `pending_user` renders after the transcript, so this is the ordering
-        // the end-of-turn poll has to repair.
         let mut state = SessionState::default();
         state.transcript.push(TranscriptMessage {
             id: "msg_a1".into(),
@@ -612,8 +635,66 @@ mod tests {
                 .unwrap_or_else(|| panic!("{needle:?} missing from:\n{display}"))
         };
         assert!(
-            row("hello") < row("hi there"),
-            "prompt must render above the reply:\n{display}"
+            row("hi there") < row("hello"),
+            "the newest reply must render above its prompt:\n{display}"
+        );
+    }
+
+    #[test]
+    fn conversation_stays_at_the_top_and_omits_non_text_records() {
+        let mut app = App::new("ses_1".into(), "/project".into());
+        app.transcript = vec![
+            TranscriptMessage {
+                id: "msg_old".into(),
+                role: Role::User,
+                text: "oldest visible message".into(),
+            },
+            TranscriptMessage {
+                id: "msg_tool".into(),
+                role: Role::Assistant,
+                text: String::new(),
+            },
+            TranscriptMessage {
+                id: "msg_idle".into(),
+                role: Role::Other("idle".into()),
+                text: String::new(),
+            },
+            TranscriptMessage {
+                id: "msg_new".into(),
+                role: Role::Assistant,
+                text: "newest visible message".into(),
+            },
+            TranscriptMessage {
+                id: "msg_newer".into(),
+                role: Role::Assistant,
+                text: "newest assistant continuation".into(),
+            },
+        ];
+
+        let mut terminal = Terminal::new(TestBackend::new(40, 9)).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let display = terminal.backend().to_string();
+        let row = |needle: &str| {
+            display
+                .lines()
+                .position(|line| line.contains(needle))
+                .unwrap_or_else(|| panic!("{needle:?} missing from:\n{display}"))
+        };
+
+        assert!(
+            row("newest assistant continuation") < row("newest visible"),
+            "{display}"
+        );
+        assert!(row("newest visible") < row("oldest visible"), "{display}");
+        assert!(!display.contains("│idle"), "{display}");
+        assert_eq!(display.matches("Assistant").count(), 1, "{display}");
+
+        app.handle_key(key(KeyCode::PageDown));
+        assert!(!app.follow);
+        app.handle_key(key(KeyCode::PageUp));
+        assert!(
+            app.follow,
+            "returning to row zero must resume top-following"
         );
     }
 
