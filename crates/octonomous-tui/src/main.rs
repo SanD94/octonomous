@@ -1,8 +1,16 @@
 mod app;
+mod cli;
 
-use std::{env, error::Error, io, panic, time::Duration};
+use std::{
+    env,
+    error::Error,
+    io, panic,
+    process::{Command as ProcessCommand, Stdio},
+    time::Duration,
+};
 
 use app::{App, Command, PermissionChoice};
+use cli::{Action, Cli, USAGE};
 use crossterm::{
     event::{Event as TerminalEvent, EventStream as TerminalEventStream},
     execute,
@@ -13,7 +21,7 @@ use octonomous_core::{
     events::{Event, EventStream, Signal},
     interaction::PermissionReply,
     reconcile::Reconciler,
-    session::Delivery,
+    session::{Delivery, SessionOptions},
     transport::Client,
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -21,26 +29,58 @@ use tokio::time;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let mut args = env::args().skip(1);
-    let directory = args
-        .next()
-        .ok_or("usage: octonomous-tui DIRECTORY [SERVER_URL]")?;
-    let server = args.next();
-    if args.next().is_some() {
-        return Err("usage: octonomous-tui DIRECTORY [SERVER_URL]".into());
+    let options = Cli::parse(env::args().skip(1))?;
+    match options.action {
+        Action::Help => {
+            println!("{USAGE}");
+            return Ok(());
+        }
+        Action::Version => {
+            println!("octonomous {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        Action::Run => {}
     }
 
-    let client = Client::discover(server.as_deref())?;
+    let (client, server_version, started_server) = connect(options.server.as_deref()).await?;
+    let version_warning = version_warning(&server_version);
+    if let Some(warning) = &version_warning {
+        eprintln!("warning: {warning}");
+    }
+    if options.check {
+        println!(
+            "OpenCode {server_version} is reachable{}",
+            if started_server {
+                " (started by octonomous)"
+            } else {
+                ""
+            }
+        );
+        return Ok(());
+    }
+
+    let directory = options
+        .directory
+        .canonicalize()
+        .map_err(|error| format!("invalid working directory {:?}: {error}", options.directory))?
+        .to_string_lossy()
+        .into_owned();
+    let (session_id, directory, resumed) = select_session(&client, &options, directory).await?;
     let event_stream = EventStream::connect(&client, 1_024)?;
     let mut events = event_stream.subscribe();
-    let session = client.create_session(directory.clone()).await?;
-    let session_id = session.id.to_string();
     let mut reconciler = Reconciler::new(client.clone(), &session_id);
     reconciler.reconcile().await?;
 
     let mut terminal = TerminalGuard::new()?;
     let mut app = App::new(session_id.clone(), directory);
     app.sync(reconciler.state());
+    app.set_status(version_warning.unwrap_or_else(|| {
+        if resumed {
+            "resumed session".into()
+        } else {
+            "created session".into()
+        }
+    }));
     let result = run(
         &mut terminal.terminal,
         &mut app,
@@ -52,6 +92,83 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .await;
     terminal.restore()?;
     result
+}
+
+async fn connect(server: Option<&str>) -> Result<(Client, String, bool), Box<dyn Error>> {
+    let initial = Client::discover(server);
+    if let Ok(client) = initial
+        && let Ok(info) = client.server_info().await
+    {
+        return Ok((client, info.version, false));
+    }
+    if server.is_some() {
+        return Err(
+            "the configured OpenCode server is unavailable; check --server and credentials".into(),
+        );
+    }
+
+    ProcessCommand::new("opencode")
+        .args(["serve", "--service"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("OpenCode is unavailable and could not be started: {error}"))?;
+
+    let mut last_error = "server did not become ready".to_owned();
+    for _ in 0..30 {
+        time::sleep(Duration::from_millis(200)).await;
+        match Client::discover(None) {
+            Ok(client) => match client.server_info().await {
+                Ok(info) => return Ok((client, info.version, true)),
+                Err(error) => last_error = error.to_string(),
+            },
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+    Err(format!("OpenCode was started but did not become ready: {last_error}").into())
+}
+
+async fn select_session(
+    client: &Client,
+    options: &Cli,
+    directory: String,
+) -> Result<(String, String, bool), Box<dyn Error>> {
+    if let Some(requested) = &options.session {
+        let session = client
+            .list_sessions(100)
+            .await?
+            .into_iter()
+            .find(|session| session.id.as_str() == requested)
+            .ok_or_else(|| format!("session {requested:?} was not found"))?;
+        return Ok((session.id.to_string(), session.location.directory, true));
+    }
+    if !options.new_session
+        && let Some(session) = client.latest_session(&directory).await?
+    {
+        return Ok((session.id.to_string(), directory, true));
+    }
+
+    let session = client
+        .create_session_with(
+            directory.clone(),
+            SessionOptions {
+                agent: options.agent.clone(),
+                model: options.model.clone(),
+            },
+        )
+        .await?;
+    Ok((session.id.to_string(), directory, false))
+}
+
+fn version_warning(server_version: &str) -> Option<String> {
+    const SUPPORTED_MAJOR: &str = "2";
+    let major = server_version.trim_start_matches('v').split('.').next()?;
+    (major != SUPPORTED_MAJOR).then(|| {
+        format!(
+            "server version {server_version} has major version {major}; this client targets OpenCode 2.x"
+        )
+    })
 }
 
 async fn run(
@@ -255,4 +372,19 @@ fn install_panic_restore() {
         let _ = restore_terminal();
         previous(info);
     }));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::version_warning;
+
+    #[test]
+    fn warns_only_when_server_major_differs() {
+        assert!(version_warning("2.0.18").is_none());
+        assert!(version_warning("v2.9.0").is_none());
+        assert_eq!(
+            version_warning("3.0.0").as_deref(),
+            Some("server version 3.0.0 has major version 3; this client targets OpenCode 2.x")
+        );
+    }
 }

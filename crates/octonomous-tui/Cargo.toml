@@ -4,6 +4,10 @@ description = "Native terminal client for octonomous"
 edition.workspace = true
 version.workspace = true
 
+[[bin]]
+name = "octonomous"
+path = "src/main.rs"
+
 [dependencies]
 crossterm = { version = "0.28", features = ["event-stream"] }
 futures-util = "0.3"

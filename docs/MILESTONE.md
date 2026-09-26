@@ -14,49 +14,16 @@ phase until the previous one exits.
 ## Dependency order
 
 ```
-M8 parity
- └─> M9 packaging
+M10 contract + baseline
+ └─> M11 sessions + events
+       └─> M12 model loop
+             └─> M13 tools + permissions
+                   └─> M14 switchover + measurement
 ```
 
-The core, headless harness, and first-cut terminal view are frozen; remaining
-client work belongs in the view unless a protocol defect requires a compatible
-core fix.
-
----
-
-## M8 — Parity
-
-Ordered by value, not dependency.
-
-- [ ] `@`-file and directory completion.
-- [ ] `/` slash-command palette (`GET /api/command`).
-- [ ] Model picker (`/api/model`), including variant selection.
-- [ ] Agent picker (`/api/agent`).
-- [ ] Session picker / resume; session tabs.
-- [ ] Streaming Markdown + syntax-highlighted fenced code blocks.
-- [ ] Tool-call rendering with live status (pending / running / done / error).
-- [ ] Inline diffs (`/api/session/{id}/diff`, `/api/vcs/status`).
-- [ ] `/undo` and `/redo` via the revert endpoints.
-- [ ] Session compaction (`/api/session/{id}/compact`).
-- [ ] Cost and token accounting (`session.usage.updated`).
-- [ ] Undo/redo of a sent prompt while streaming.
-- [ ] Configurable keybindings, persisted.
-
-**Exit:** parity checklist is explicit and each item is either done or
-deliberately descoped with a written rationale.
-
----
-
-## M9 — Packaging
-
-- [ ] `cargo build --release`; report binary size and stripped RSS.
-- [ ] `cargo install --path` works; single self-contained binary.
-- [ ] Handle absent/stale server: detect, start via `opencode serve --service`,
-      or fall back to a clear error.
-- [ ] Version check against `GET /api/info`; warn on major-version skew.
-- [ ] Smoke test against a freshly started server on a clean machine.
-
-**Exit:** fresh machine, one install command, working client.
+The protocol core and native frontend are complete. Client-side parity beyond
+the minimal durable-session workflow is deliberately out of scope; DESCRIPTION
+§5.5 records the boundary. Work now returns to the backend contract.
 
 ---
 
@@ -67,10 +34,10 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 1. **octonomous does not touch server memory.** The client win (~180 MB, §1.1)
    is independent and still holds. The server's own growth (§1.2,
    ~153 MB → 294-362 MB) is untouched by any milestone here. DESCRIPTION §9 is
-   the investigation, and nothing in M8–M9 should be predicated on its outcome.
-2. **Do not fork or replace the server during M8–M9.** Those phases use it as the
-   behavioral reference. M10+ may implement only the bounded compatibility
-   contract in DESCRIPTION §11; a full OpenCode rewrite remains rejected.
+   the investigation, and backend work must not assume its outcome.
+2. **Keep the stock server as the behavioral reference.** Backend milestones may
+   implement only the bounded compatibility contract in DESCRIPTION §11; a full
+   OpenCode rewrite remains rejected.
 3. **Event drift.** New `type` values will appear. The catch-all variant is what
    keeps this survivable — do not remove it to "tidy up".
 4. **The API is labelled experimental.** A breaking change is a matter of when,
@@ -84,7 +51,8 @@ Carried from DESCRIPTION §6. Watch these at every phase boundary:
 
 ## Side quests (not on the critical path)
 
-Neither blocks M8–M9. Both are cheap and worth doing opportunistically.
+Neither blocks the backend milestones. Both are cheap and worth doing
+opportunistically.
 
 ### S1 — Upstream spec and docs fixes
 
@@ -104,21 +72,21 @@ a day; the checklist is in that section.
 
 ---
 
-## Backend phase — after middle and frontend
+## Backend phase
 
-The frozen core is the completed **middle** phase and M8–M9 finish the
-**frontend** phase. Only after M9 exits does work return to the backend. The backend
-milestones implement the limited compatibility and resource contract in
-DESCRIPTION §11; they do not recreate OpenCode.
+The frozen core is the completed **middle** phase and the packaged terminal
+client is the completed **frontend** phase. The remaining milestones implement
+the limited compatibility and resource contract in DESCRIPTION §11; they do not
+recreate OpenCode.
 
 ```
 frozen middle/core
-   └─> M8–M9 frontend
+   └─> packaged frontend
           └─> M10 contract + baseline
-                 └─> M11 sessions + events
-                        └─> M12 model loop
-                               └─> M13 tools + permissions
-                                      └─> M14 switchover + measurement
+                └─> M11 sessions + events
+                      └─> M12 model loop
+                            └─> M13 tools + permissions
+                                  └─> M14 switchover + measurement
 ```
 
 ### M10 — Backend contract and measured baseline

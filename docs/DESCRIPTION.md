@@ -70,8 +70,11 @@ that response plus 100 × 100 KiB transcript messages.
 
 The important mid-stream figure meets the original 5–15 MB target. The full
 transcript result also makes the cost of retaining history explicit. These are
-core/headless measurements; the terminal view's incremental RSS remains to be
-measured separately.
+core/headless measurements. After packaging the terminal client, its stripped
+release binary is **6,817,280 bytes (6.5 MiB)** and its idle RSS after connecting
+and resuming a session is **9,008 KiB (8.8 MiB)**. The latter was sampled from
+the `octonomous` process itself under a pseudo-terminal, excluding the temporary
+`opencode service status` discovery subprocess.
 
 ### 1.2 The server-side problem, stated precisely
 
@@ -374,6 +377,28 @@ explicit versioned migration. `generated` remains public because core methods
 return pinned V2 protocol types, but it changes only when the pinned protocol
 specification is deliberately updated.
 
+### 5.5 Frontend scope and distribution
+
+The native frontend intentionally stops at the durable workflow needed to drive
+and compare backends. It resumes the most recently updated session in the chosen
+working directory by default; `--session` selects an exact session and `--new`
+starts another. New sessions accept `--agent` and
+`--model PROVIDER/ID[@VARIANT]`, keeping agent, model, and variant selection
+available without building transient picker UI.
+
+Full stock-TUI parity is deliberately not a project gate. File and slash
+completion, session tabs, Markdown and syntax highlighting, specialized tool and
+diff views, undo/redo and compaction controls, detailed usage display, streaming
+prompt recall, and persisted configurable keybindings do not affect the protocol
+contract or the backend memory objective. The generated client retains those V2
+routes for future consumers, but the terminal view does not add UI for them.
+
+`cargo install --path crates/octonomous-tui` installs one stripped `octonomous`
+binary. At startup it checks `/api/info`, warns on major-version skew, and, when
+no explicit `--server` was supplied, starts an unavailable local service with
+`opencode serve --service`. `octonomous --check` performs the same connectivity
+and compatibility check without opening the terminal UI.
+
 ---
 
 ## 6. Risks
@@ -381,7 +406,7 @@ specification is deliberately updated.
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Server growth (~153 MB → ~300-360 MB) is unbounded and unavoidable from a client | High | Measure before optimising anything; see §9. octonomous still captures the ~180 MB client win independently. |
-| Terminal view increment is not yet measured | Low | §1.1 publishes the headless baseline; re-measure the release binary after the view lands. |
+| Terminal client RSS grows with rendered transcript state | Low | §1.1 publishes both the headless stress baseline and packaged-client idle measurement; retain bounded transcript work in backend acceptance tests. |
 | Generated types fail to deserialize on newer servers | Medium | Lenient event types; `serde(default)`; version-pin the spec in-repo. |
 | Event enum drifts as V2 evolves | Medium | Catch-all `Unknown` variant; capture fixture tests from live streams. |
 | No `securitySchemes` — auth silently absent from codegen | Medium | Covered in §4.2; add a test that fails without auth. |
@@ -492,7 +517,7 @@ evidence behind it — which is a far better outcome than a fork.
 |---|---|
 | `CI.md` | Reproducible baseline checks and the pinned OpenCode version. |
 | `DESCRIPTION.md` | This document. |
-| `MILESTONE.md` | Remaining phased plan, M8–M14, with exit criteria. |
+| `MILESTONE.md` | Remaining backend plan, M10–M14, with exit criteria. |
 | `openapi-v2.0.18.json` | Full V2 spec fetched from the live server (248 KB, 138 operations, 247 schemas). Source for generated client code. |
 | `fixtures/prompt-basic-v2.0.18.sse` | Raw captured SSE stream from one real prompt (69 frames, 3 heartbeats). Event-ingestion regression fixture. |
 | `fixtures/prompt-basic-v2.0.18.session-id.txt` | The session ID used for that capture, for reproducing it live. |
@@ -505,8 +530,9 @@ The implementation order is deliberate:
 
 1. **Middle (complete):** the UI-independent protocol and state core is proven
    and frozen against the stock OpenCode server.
-2. **Frontend (M8–M9 remaining):** extend and package the native terminal client
-   on that core while the stock server remains the behavioral reference.
+2. **Frontend (complete):** the packaged native terminal client implements the
+   durable workflow in §5.5 while the stock server remains the behavioral
+   reference.
 3. **Backend (M10+):** return to the server problem only after the client works,
    then implement a small Rust backend for the subset octonomous actually uses.
 

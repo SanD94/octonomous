@@ -10,6 +10,20 @@ use crate::{envelope, generated, transport::Client};
 
 pub use generated::types::SessionInboxDelivery as Delivery;
 
+/// Optional agent and model settings applied when a session is created.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SessionOptions {
+    pub agent: Option<String>,
+    pub model: Option<ModelSelection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ModelSelection {
+    pub id: String,
+    pub provider_id: String,
+    pub variant: Option<String>,
+}
+
 impl Client {
     /// Create a session and verify that OpenCode honored the requested working
     /// directory. The directory lives in the JSON body, not a header or query.
@@ -17,10 +31,26 @@ impl Client {
         &self,
         directory: impl Into<String>,
     ) -> Result<generated::types::SessionInfo, envelope::Error> {
+        self.create_session_with(directory, SessionOptions::default())
+            .await
+    }
+
+    /// Create a session with an explicit agent and model selection.
+    pub async fn create_session_with(
+        &self,
+        directory: impl Into<String>,
+        options: SessionOptions,
+    ) -> Result<generated::types::SessionInfo, envelope::Error> {
         let directory = directory.into();
         let body = generated::types::SessionCreateBody {
+            agent: options.agent,
             location: Some(generated::types::LocationPublicRef {
                 directory: directory.clone(),
+            }),
+            model: options.model.map(|model| generated::types::ModelRef {
+                id: model.id,
+                provider_id: model.provider_id,
+                variant: model.variant,
             }),
             ..Default::default()
         };
@@ -38,6 +68,18 @@ impl Client {
             });
         }
         Ok(session)
+    }
+
+    /// Return the most recently updated session in `directory`, if one exists.
+    pub async fn latest_session(
+        &self,
+        directory: &str,
+    ) -> Result<Option<generated::types::SessionInfo>, envelope::Error> {
+        let sessions = self.list_sessions(100).await?;
+        Ok(sessions
+            .into_iter()
+            .filter(|session| session.location.directory == directory)
+            .max_by(|left, right| left.time.updated.total_cmp(&right.time.updated)))
     }
 
     /// Read every page of sessions in server order.

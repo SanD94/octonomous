@@ -3,7 +3,7 @@ use octonomous_core::{
     envelope::Error,
     events::{Envelope, Signal},
     reconcile::{Reconciler, Role},
-    session::Delivery,
+    session::{Delivery, ModelSelection, SessionOptions},
     transport::Client,
 };
 use serde_json::{Value, json};
@@ -98,6 +98,37 @@ async fn create_rejects_a_silently_wrong_working_directory() {
 }
 
 #[tokio::test]
+async fn create_sends_selected_agent_model_and_variant() {
+    let (url, server) = one_response(json!({"data": session("/wanted", "ses_1")})).await;
+
+    client(&url)
+        .create_session_with(
+            "/wanted",
+            SessionOptions {
+                agent: Some("build".into()),
+                model: Some(ModelSelection {
+                    id: "claude-opus".into(),
+                    provider_id: "anthropic".into(),
+                    variant: Some("high".into()),
+                }),
+            },
+        )
+        .await
+        .unwrap();
+
+    let request = server.await.unwrap();
+    let body: Value = serde_json::from_str(request.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(
+        body,
+        json!({
+            "agent": "build",
+            "location": {"directory": "/wanted"},
+            "model": {"id": "claude-opus", "providerID": "anthropic", "variant": "high"}
+        })
+    );
+}
+
+#[tokio::test]
 async fn list_sessions_follows_next_cursors() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -125,6 +156,32 @@ async fn list_sessions_follows_next_cursors() {
     let requests = server.await.unwrap();
     assert!(requests[0].starts_with("GET /api/session?limit=1&order=asc "));
     assert!(requests[1].contains("cursor=page-2"));
+}
+
+#[tokio::test]
+async fn latest_session_filters_by_directory_and_uses_updated_time() {
+    let response = json!({
+        "data": [
+            session("/other", "ses_1"),
+            session("/wanted", "ses_2"),
+            {
+                "id": "ses_3", "projectID": "project", "cost": 0,
+                "tokens": {"input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+                "time": {"created": 1, "updated": 9},
+                "location": {"directory": "/wanted"}
+            }
+        ],
+        "cursor": {}
+    });
+    let (url, _server) = one_response(response).await;
+
+    let latest = client(&url)
+        .latest_session("/wanted")
+        .await
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(latest.id.to_string(), "ses_3");
 }
 
 #[tokio::test]

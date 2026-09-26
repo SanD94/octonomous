@@ -5,7 +5,8 @@ use thiserror::Error;
 
 pub const DEFAULT_SERVER: &str = "http://127.0.0.1:4096";
 
-/// Discover the running service, then use the configured fallbacks in order.
+/// Use an explicit server when supplied, otherwise discover the running
+/// service and then use the configured fallbacks in order.
 pub fn discover_server(server_flag: Option<&str>) -> Result<Url, DiscoveryError> {
     let status = Command::new("opencode")
         .args(["service", "status"])
@@ -31,13 +32,17 @@ fn resolve_server(
     server_flag: Option<&str>,
     environment: Option<&str>,
 ) -> Result<Url, DiscoveryError> {
+    if let Some(candidate) = server_flag {
+        return parse_url(candidate)
+            .ok_or_else(|| DiscoveryError::InvalidUrl(candidate.to_owned()));
+    }
     if let Ok(output) = status_output
         && let Some(url) = output.lines().find_map(parse_url)
     {
         return Ok(url);
     }
 
-    let candidate = server_flag.or(environment).unwrap_or(DEFAULT_SERVER);
+    let candidate = environment.unwrap_or(DEFAULT_SERVER);
     parse_url(candidate).ok_or_else(|| DiscoveryError::InvalidUrl(candidate.to_owned()))
 }
 
@@ -60,22 +65,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn service_status_wins_then_flag_environment_and_default_follow() {
-        let discovered = resolve_server(
+    fn explicit_flag_wins_then_service_status_environment_and_default_follow() {
+        let flag = resolve_server(
             Ok("OpenCode service: http://127.0.0.1:49374\n"),
             Some("https://flag.example"),
             Some("https://environment.example"),
         )
         .unwrap();
-        assert_eq!(discovered.as_str(), "http://127.0.0.1:49374/");
+        assert_eq!(flag.as_str(), "https://flag.example/");
 
-        let flag = resolve_server(
-            Err("not running"),
-            Some("https://flag.example"),
+        let discovered = resolve_server(
+            Ok("OpenCode service: http://127.0.0.1:49374\n"),
+            None,
             Some("https://environment.example"),
         )
         .unwrap();
-        assert_eq!(flag.as_str(), "https://flag.example/");
+        assert_eq!(discovered.as_str(), "http://127.0.0.1:49374/");
 
         let environment = resolve_server(
             Err("not running"),
