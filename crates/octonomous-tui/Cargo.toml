@@ -1,0 +1,8 @@
+[package]
+name = "octonomous-tui"
+description = "Native terminal client for octonomous"
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+octonomous-core = { path = "../octonomous-core" }

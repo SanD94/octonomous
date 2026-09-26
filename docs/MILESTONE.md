@@ -1,7 +1,7 @@
 # octonomous — Milestones
 
 Sequenced so the protocol layer is proven before any terminal rendering work
-begins. Phases M0–M6 involve **no** `ratatui` and are all testable headlessly.
+begins.
 
 Each phase lists exit criteria that must be objectively checkable. Do not start a
 phase until the previous one exits.
@@ -11,40 +11,19 @@ phase until the previous one exits.
 ## Dependency order
 
 ```
-M0 spec pin
- └─> M1 codegen
-      └─> M2 auth + discovery
-           └─> M3 SSE ingestion
-                └─> M4 lifecycle + reconcile
-                     └─> M5 permissions / interrupt
-                          └─> M6 headless harness  ← CORE FROZEN
-                               └─> M7 ratatui view
-                                    └─> M8 parity
-                                         └─> M9 packaging
+M1 codegen
+ └─> M2 auth + discovery
+      └─> M3 SSE ingestion
+           └─> M4 lifecycle + reconcile
+                └─> M5 permissions / interrupt
+                     └─> M6 headless harness  ← CORE FROZEN
+                          └─> M7 ratatui view
+                               └─> M8 parity
+                                    └─> M9 packaging
 ```
 
 M6 is the gate. Until it passes, the core is expected to churn; after it, the
 view is where remaining effort goes.
-
----
-
-## M0 — Spec pin and workspace
-
-**Goal:** a reproducible, versioned starting point.
-
-- [ ] Create cargo workspace, `crates/octonomous-core`, `crates/octonomous-tui`.
-- [ ] Commit `docs/openapi-v2.0.18.json` (already captured).
-- [ ] Add `scripts/fetch-openapi.sh` — pulls `/openapi.json` from a running
-      server, normalises, and diffs against the committed copy.
-- [ ] Commit `docs/fixtures/` — the captured raw SSE stream from a real prompt
-      (see §5.5 of DESCRIPTION.md).
-- [ ] Add `opencode-version` to CI notes; the target is `v2.0.18`.
-- [ ] Toolchain: pin Rust edition/MSRV in `Cargo.toml`. Target
-      `aarch64-apple-darwin`; confirm `cargo build --release` produces a binary
-      that runs on macOS 15.7.7.
-
-**Exit:** `cargo build` succeeds on a clean checkout; committed spec matches a
-freshly fetched one; fixture replays offline.
 
 ---
 
@@ -92,7 +71,7 @@ a written note lists every union that degraded to `Value` and why.
 - Unauthenticated request returns a typed `Unauthorized` — test asserts this.
 - Authenticated `GET /api/info` returns the version.
 - A unit test fails if auth headers are absent (**guards the missing
-  `securitySchemes`** — see DESCRIPTION §6.2).
+  `securitySchemes`** — see DESCRIPTION §4.2).
 
 ---
 
@@ -136,7 +115,7 @@ a written note lists every union that degraded to `Value` and why.
 - [ ] Create session with `location.directory` **in the body**.
 - [ ] **Assert** the response's `data.location.directory` matches what was
       requested; error loudly otherwise. Guards the silent-wrong-cwd trap
-      (DESCRIPTION §5.3).
+      (DESCRIPTION §3.3).
 - [ ] List sessions with cursor pagination.
 - [ ] `GET /session/{id}/message` for authoritative history.
 - [ ] Send prompts: `POST /session/{id}/prompt`. Note it returns an inbox item,
@@ -208,7 +187,7 @@ constraint asserted in CI.
 
 ---
 
-## M7 — ratatui view, v1
+## M7 — ratatui view, first cut
 
 **Goal:** first usable terminal UI, built only on the frozen core.
 
@@ -268,21 +247,21 @@ deliberately descoped with a written rationale.
 
 ## Cross-cutting risks
 
-Carried from DESCRIPTION §8. Watch these at every phase boundary:
+Carried from DESCRIPTION §6. Watch these at every phase boundary:
 
 1. **octonomous does not touch server memory.** The client win (~180 MB, §1.1)
    is independent and still holds. The server's own growth (§1.2,
-   ~153 MB → 294-362 MB) is untouched by any milestone here. DESCRIPTION §11 is
-   the investigation, and nothing in M0-M9 should be predicated on its outcome.
-2. **Do not fork or replace the server during M0–M9.** Those phases use it as the
+   ~153 MB → 294-362 MB) is untouched by any milestone here. DESCRIPTION §9 is
+   the investigation, and nothing in M1-M9 should be predicated on its outcome.
+2. **Do not fork or replace the server during M1–M9.** Those phases use it as the
    behavioral reference. M10+ may implement only the bounded compatibility
-   contract in DESCRIPTION §13; a full OpenCode rewrite remains rejected.
+   contract in DESCRIPTION §11; a full OpenCode rewrite remains rejected.
 3. **Event drift.** New `type` values will appear. The catch-all variant is what
    keeps this survivable — do not remove it to "tidy up".
 4. **The API is labelled experimental.** A breaking change is a matter of when,
    not whether. Keeping generated code in one directory is what makes that
    recoverable.
-5. **No working V2 reference implementation exists.** DESCRIPTION §5 is the
+5. **No reference client exists for the V2 surface.** DESCRIPTION §3 is the
    reference. If reality contradicts it, the docs are wrong — fix the docs
    first, then the code.
 
@@ -290,35 +269,35 @@ Carried from DESCRIPTION §8. Watch these at every phase boundary:
 
 ## Side quests (not on the critical path)
 
-Neither blocks M0-M9. Both are cheap and worth doing opportunistically.
+Neither blocks M1-M9. Both are cheap and worth doing opportunistically.
 
 ### S1 — Upstream spec and docs fixes
 
-DESCRIPTION §10.3. Four gaps, each blocking every third-party client. Small,
+DESCRIPTION §8.3. Four gaps, each blocking every third-party client. Small,
 self-contained pull requests against the OpenCode repository:
 
-- [ ] Add `securitySchemes` (HTTP Basic) to the OpenAPI document. §5.1
-- [ ] Give `V2EventEncoded` a real object schema instead of an opaque string. §6.2
+- [ ] Add `securitySchemes` (HTTP Basic) to the OpenAPI document. §3.1
+- [ ] Give `V2EventEncoded` a real object schema instead of an opaque string. §4.2
 - [ ] Document `location.directory` as a body field, and state explicitly that
-      the header and query-param forms do not work. §5.3
-- [ ] Return 404 or 410 for retired V1 routes instead of 200 + HTML. §4.1
+      the header and query-param forms do not work. §3.3
+- [ ] Return 404 for unknown and unprefixed paths instead of 200 + HTML. §3
 
 ### S2 — Server growth investigation
 
-DESCRIPTION §11. Run before proposing any server-side memory work. Roughly half
+DESCRIPTION §9. Run before proposing any server-side memory work. Roughly half
 a day; the checklist is in that section.
 
 ---
 
 ## Backend phase — after middle and frontend
 
-M0–M6 remain the **middle** phase and M7–M9 remain the **frontend** phase. Only
+M1–M6 remain the **middle** phase and M7–M9 remain the **frontend** phase. Only
 after M9 exits does work return to the backend. The backend milestones implement
-the limited compatibility and resource contract in DESCRIPTION §13; they do not
+the limited compatibility and resource contract in DESCRIPTION §11; they do not
 recreate OpenCode.
 
 ```
-M0–M6 middle/core
+M1–M6 middle/core
    └─> M7–M9 frontend
           └─> M10 contract + baseline
                  └─> M11 sessions + events
@@ -331,8 +310,11 @@ M0–M6 middle/core
 
 **Goal:** freeze what the small backend must do before implementing it.
 
-- [ ] Record stock-server wire fixtures for every route in DESCRIPTION §13.1,
+- [ ] Record stock-server wire fixtures for every route in DESCRIPTION §11.1,
       including success, validation failure, missing resource, and cancellation.
+- [ ] Treat the V2 surface as the whole contract: no route, event name, or error
+      form from any other version of the OpenCode API gets implemented or
+      translated. Anything outside §11.1 is a structured `404`.
 - [ ] Define a capability response so clients can distinguish unsupported
       features without probing routes or relying on version strings.
 - [ ] Measure stock-server RSS at idle, while streaming, with a long transcript,
@@ -419,7 +401,4 @@ no projected or assumed memory claim in place of measurements.
 
 ## Backend non-goals
 
-Even after M14, full OpenCode parity remains out of scope: no web UI, sharing,
-plugins, MCP, LSP, worktrees, snapshots, formatter management, multi-agent
-orchestration, provider catalogue, or general OpenCode configuration emulation
-without a later demonstrated requirement and milestone.
+Multi-agent orchestration would be considered but after seeing the usage.

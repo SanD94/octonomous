@@ -1,0 +1,8 @@
+[package]
+name = "octonomous-core"
+description = "UI-independent OpenCode protocol core for octonomous"
+edition.workspace = true
+version.workspace = true
+
+[lib]
+path = "src/lib.rs"

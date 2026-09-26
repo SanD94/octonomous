@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/octonomous-core",
+    "crates/octonomous-tui",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
