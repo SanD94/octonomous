@@ -90,10 +90,11 @@ octonomous --check
 
 | Key | Action |
 |---|---|
-| `Enter` | Send the prompt |
-| `Shift+Enter`, `Ctrl+Enter`, or `Ctrl+J` | Insert a newline |
-| `Esc` | Interrupt a running response, or clear the composer |
-| `Up` / `Down` | Navigate prompt history |
+| `i` | Open the floating composer |
+| `Enter` | Send the prompt and close the composer |
+| `Shift+Enter`, `Ctrl+Enter`, or `Ctrl+J` | Insert a newline in the composer |
+| `Esc` | Close the composer without sending, or interrupt a running response |
+| `Up` / `Down` | Navigate prompt history in the composer |
 | `Page Up` / `Page Down` | Scroll the transcript |
 | `Ctrl+C` | Quit |
 | `1` or `o` | Allow a pending permission once |

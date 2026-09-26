@@ -35,6 +35,7 @@ pub struct App {
     permissions: Vec<PendingPermission>,
     composer: Vec<char>,
     cursor: usize,
+    composing: bool,
     history: Vec<String>,
     history_index: Option<usize>,
     history_scratch: String,
@@ -57,6 +58,7 @@ impl App {
             permissions: Vec::new(),
             composer: Vec::new(),
             cursor: 0,
+            composing: false,
             history: Vec::new(),
             history_index: None,
             history_scratch: String::new(),
@@ -137,6 +139,23 @@ impl App {
             });
         }
 
+        if !self.composing {
+            match key.code {
+                KeyCode::Char('i') if key.modifiers.is_empty() => self.composing = true,
+                KeyCode::Esc if self.running => return Some(Command::Interrupt),
+                KeyCode::PageUp => {
+                    self.follow = false;
+                    self.scroll = self.scroll.saturating_sub(5);
+                }
+                KeyCode::PageDown => {
+                    self.scroll = (self.scroll + 5).min(self.max_scroll);
+                    self.follow = self.scroll == self.max_scroll;
+                }
+                _ => {}
+            }
+            return None;
+        }
+
         match key.code {
             KeyCode::Enter
                 if key
@@ -149,8 +168,7 @@ impl App {
                 self.insert('\n');
             }
             KeyCode::Enter => return self.submit(),
-            KeyCode::Esc if self.running => return Some(Command::Interrupt),
-            KeyCode::Esc => self.clear_composer(),
+            KeyCode::Esc => self.close_composer(),
             KeyCode::Char(character)
                 if !key
                     .modifiers
@@ -199,14 +217,15 @@ impl App {
         }
         self.history.push(text.clone());
         self.pending_user.push(text.clone());
-        self.clear_composer();
+        self.close_composer();
         self.follow = true;
         Some(Command::Send(text))
     }
 
-    fn clear_composer(&mut self) {
+    fn close_composer(&mut self) {
         self.composer.clear();
         self.cursor = 0;
+        self.composing = false;
         self.history_index = None;
         self.history_scratch.clear();
     }
@@ -267,17 +286,14 @@ impl App {
         let area = frame.area();
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(4),
-                Constraint::Length(5),
-                Constraint::Length(1),
-            ])
+            .constraints([Constraint::Min(4), Constraint::Length(1)])
             .split(area);
         self.render_transcript(frame, chunks[0]);
-        self.render_composer(frame, chunks[1]);
-        self.render_status(frame, chunks[2]);
+        self.render_status(frame, chunks[1]);
         if let Some(permission) = self.permissions.first() {
             render_permission(frame, area, permission);
+        } else if self.composing {
+            self.render_composer(frame, area);
         }
     }
 
@@ -321,34 +337,35 @@ impl App {
     }
 
     fn render_composer(&self, frame: &mut Frame, area: Rect) {
+        let popup = centered_rect(72, 12, area);
         let text: String = self.composer.iter().collect();
+        frame.render_widget(Clear, popup);
         frame.render_widget(
             Paragraph::new(text)
                 .block(
                     Block::default()
                         .borders(Borders::ALL)
-                        .title(" Message · Enter send · Shift+Enter/Ctrl+J newline "),
+                        .title(" Compose · Enter send · Esc cancel ")
+                        .style(Style::default().bg(Color::Black)),
                 )
                 .wrap(Wrap { trim: false }),
-            area,
+            popup,
         );
-        if self.permissions.is_empty() {
-            let before: String = self.composer[..self.cursor].iter().collect();
-            let row = before
-                .chars()
-                .filter(|character| *character == '\n')
-                .count() as u16;
-            let column = before
-                .rsplit('\n')
-                .next()
-                .map(str::chars)
-                .map(Iterator::count)
-                .unwrap_or(0) as u16;
-            frame.set_cursor_position((
-                area.x + 1 + column.min(area.width.saturating_sub(3)),
-                area.y + 1 + row.min(area.height.saturating_sub(3)),
-            ));
-        }
+        let before: String = self.composer[..self.cursor].iter().collect();
+        let row = before
+            .chars()
+            .filter(|character| *character == '\n')
+            .count() as u16;
+        let column = before
+            .rsplit('\n')
+            .next()
+            .map(str::chars)
+            .map(Iterator::count)
+            .unwrap_or(0) as u16;
+        frame.set_cursor_position((
+            popup.x + 1 + column.min(popup.width.saturating_sub(3)),
+            popup.y + 1 + row.min(popup.height.saturating_sub(3)),
+        ));
     }
 
     fn render_status(&self, frame: &mut Frame, area: Rect) {
@@ -359,7 +376,7 @@ impl App {
                 SPINNER[self.tick % SPINNER.len()]
             )
         } else {
-            "idle · Esc clear · Ctrl+C quit".into()
+            "idle · i compose · Ctrl+C quit".into()
         };
         let line = Line::from(vec![
             Span::styled(activity, Style::default().fg(Color::Green)),
@@ -452,8 +469,9 @@ mod tests {
     }
 
     #[test]
-    fn composer_supports_multiline_history_and_submission() {
+    fn i_opens_composer_that_supports_multiline_history_and_submission() {
         let mut app = App::new("ses_1".into(), "/project".into());
+        app.handle_key(key(KeyCode::Char('i')));
         app.handle_key(key(KeyCode::Char('h')));
         app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL));
         app.handle_key(key(KeyCode::Char('i')));
@@ -462,9 +480,35 @@ mod tests {
             app.handle_key(key(KeyCode::Enter)),
             Some(Command::Send("h\ni".into()))
         );
+        assert!(!app.composing);
+
+        app.handle_key(key(KeyCode::Char('i')));
         app.handle_key(key(KeyCode::Up));
         assert_eq!(app.composer.iter().collect::<String>(), "h\ni");
         app.handle_key(key(KeyCode::Down));
+        assert!(app.composer.is_empty());
+    }
+
+    #[test]
+    fn composer_is_hidden_until_opened_and_escape_cancels_it() {
+        let mut app = App::new("ses_1".into(), "/project".into());
+        app.handle_key(key(KeyCode::Char('x')));
+        assert!(app.composer.is_empty());
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let closed = terminal.backend().to_string();
+        assert!(!closed.contains("Compose ·"));
+        assert!(closed.contains("i compose"));
+
+        app.handle_key(key(KeyCode::Char('i')));
+        app.handle_key(key(KeyCode::Char('x')));
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let open = terminal.backend().to_string();
+        assert!(open.contains("Compose ·"));
+
+        app.handle_key(key(KeyCode::Esc));
+        assert!(!app.composing);
         assert!(app.composer.is_empty());
     }
 
@@ -516,6 +560,7 @@ mod tests {
     #[test]
     fn a_reconciled_turn_shows_the_prompt_above_the_reply() {
         let mut app = App::new("ses_1".into(), "/project".into());
+        app.handle_key(key(KeyCode::Char('i')));
         for character in "hello".chars() {
             app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE));
         }
